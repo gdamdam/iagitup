@@ -45,7 +45,7 @@ The git repo bundle will be available at url:
 
     https://archive.org/download/github.com-<GITHUBUSER>-<RESPOSITORY>_-_<DATE-LAST-PUSH>/<BUNDLENAME>.bundle
 
-## Restore an archived github repo
+## Restore an archived github repository
 
 Download the bundle file, form the archived item:
 
