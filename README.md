@@ -1,8 +1,31 @@
-# iagitup.py - v1.0 - archive a github repo on archive.org
+# iagitup.py - v1.0 - archive a github repository on archive.org
 
-A small tool to archive a GitHub repo into the Internet Archive.
-The script downloads the GitHub repo, creates a git bundle and uploads it on archive.org
+A small tool to archive a GitHub repository on the Internet Archive.
+The script downloads the GitHub repository, creates a git bundle and uploads it on archive.org
 The upload is enriched with metadata from the github api and the README.md
+
+## Install
+
+Clone the repo and create the virtualenv and all things...
+
+    git clone https://github.com/gdamdam/iagitup.git
+    cd iagitup
+
+create the virtualenv:
+
+    virtualenv venv
+    source venv/bin/activate
+
+install the requirements:
+
+    pip install -r requirements.txt
+
+If you don't already have an Internet Archive account, [register for one](https://archive.org/account/login.createaccount.php) to give the script upload privileges.
+
+Configure internetarchive with your Internet Archive account:
+
+        ia configure
+
 
 ## Usage
 
@@ -31,33 +54,6 @@ Just download the _.bundle_ file and run:
 
      git clone file.bundle -b master
 
-## Install
-
-Clone the repo and create the virtualenv and all things...
-
-    git clone https://github.com/gdamdam/iagitup.git
-    cd iagitup
-
-create the virtualenv:
-
-    virtualenv venv
-    source venv/bin/activate
-
-install the requirements:
-
-    pip install -r requirements.txt
-
-If you don't already have an Internet Archive account, [register for one](https://archive.org/account/login.createaccount.php) to give the script upload privileges.
-
-Configure internetarchive with your Internet Archive account:
-
-        ia configure
-
-
-
-## Credits
-
-Inspired by [tubeup](https://github.com/bibanon/tubeup) by Bibliotheca Anonoma, Copyright (c) 2016 GPLv3.
 
 
 ## License (GPLv3)
