@@ -98,7 +98,7 @@ def create_bundle(gh_repo_folder, repo_name):
         main_pwd = os.getcwd()
         os.chdir(gh_repo_folder)
         bundle_name = '{}.bundle'.format(repo_name)
-        subprocess.check_call(['/usr/local/bin/git','bundle','create', bundle_name, 'master'])
+        subprocess.check_call(['git','bundle','create', bundle_name, 'master'])
         bundle_path = '{}/{}'.format(gh_repo_folder,bundle_name)
         os.chdir(main_pwd)
     else:
