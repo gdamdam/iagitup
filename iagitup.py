@@ -196,7 +196,7 @@ def main():
     gh_repo_data, repo_folder = repo_download(URL)
 
     # upload the repo on IA
-    identifier, meta, bundle_file= upload_ia(repo_folder, gh_repo_data)
+    identifier, meta, bundle_filename= upload_ia(repo_folder, gh_repo_data)
 
     # cleaning
     shutil.rmtree(repo_folder)
