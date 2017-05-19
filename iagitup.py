@@ -176,7 +176,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
         else:
             print("\nSTOP: The same repository seems already archived.")
             print(("---->>  Archived repository URL: \n \thttps://archive.org/details/%s") % itemname)
-            print("---->>  Archived git bundle file: \n \thttps://archive.org/download/{0}/{0}.bundle \n\n".format(itemname))
+            print("---->>  Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(itemname,bundle_filename))
             shutil.rmtree(gh_repo_folder)
             exit(0)
 
@@ -186,7 +186,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
         exit(1)
 
     # return item identifier and metadata as output
-    return itemname, meta
+    return itemname, meta, bundle_filename
 
 
 def main():
@@ -196,7 +196,7 @@ def main():
     gh_repo_data, repo_folder = repo_download(URL)
 
     # upload the repo on IA
-    identifier, meta = upload_ia(repo_folder, gh_repo_data)
+    identifier, meta, bundle_file= upload_ia(repo_folder, gh_repo_data)
 
     # cleaning
     shutil.rmtree(repo_folder)
@@ -205,7 +205,7 @@ def main():
     print(("\n:: Upload FINISHED. Item information:"))
     print(("Title: %s") % meta['title'])
     print(("Archived repository URL: \n \thttps://archive.org/details/%s") % identifier)
-    print("Archived git bundle file: \n \thttps://archive.org/download/{0}/{0}.bundle \n\n".format(identifier))
+    print("Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(identifier,bundle_filename))
 
 
 if __name__ == '__main__':
