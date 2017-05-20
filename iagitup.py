@@ -112,8 +112,8 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     pushed = datetime.strptime(gh_repo_data['pushed_at'], '%Y-%m-%dT%H:%M:%SZ')
     pushed_date = pushed.strftime('%Y-%m-%d_%H-%M-%S')
     raw_pushed_date = pushed.strftime('%Y-%m-%d %H:%M:%S')
-    date = d.strftime('%Y-%m-%d')
-    year = d.year
+    date = pushed.strftime('%Y-%m-%d')
+    year = pushed.year
 
     # preparing some names
     repo_name = gh_repo_data['full_name'].replace('/','-')
