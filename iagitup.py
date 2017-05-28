@@ -122,7 +122,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
 
     # preparing some description
     description_footer = 'To restore the repo download the bundle <tt>{0}.bundle</tt> and run: <pre><code> git clone {0}.bundle -b master </code></pre>'.format(bundle_filename)
-    description = '<br/> {0} <br/><br/> {1} <br/>{2}'.format(gh_repo_data['description'],get_description_from_readme(gh_repo_folder),description_header)
+    description = '<br/> {0} <br/><br/> {1} <br/>{2}'.format(gh_repo_data['description'],get_description_from_readme(gh_repo_folder),description_footer)
 
     # preparing uploader metadata
     uploader_url = gh_repo_data['owner']['html_url']
