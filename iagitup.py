@@ -22,7 +22,7 @@ __author__     = "Giovanni Damiola"
 __copyright__  = "Copyright 2017, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
-__version__    = "v1.0"
+__version__    = "v1.1"
 
 import os
 import sys
@@ -40,7 +40,8 @@ from markdown2 import markdown_path
 
 # parse and grab the args
 parser = argparse.ArgumentParser(description="iagitup.py: download a github repo and archive it on the Internet Archive\n")
-parser.add_argument('--githuburl', '-u', default=None, type=str, required=True, help="github repo url")
+parser.add_argument('--githuburl', '-u', default=None, type=str, required=True, help="Github's url repository")
+parser.add_argument('--metadata', '-m', default=None, type=str, required=False, help="Custom metadata to add to the archive.org item.")
 args = parser.parse_args()
 
 
@@ -58,6 +59,11 @@ def repo_download(github_repo_url):
     # parsing url to initialize the github api rul and get the repo_data
     gh_user, gh_repo = github_repo_url.split('/')[3:]
     gh_api_url = "https://api.github.com/repos/{}/{}".format(gh_user,gh_repo)
+
+    # delete the temp directory if exists
+    repo_folder = download_dir+'/'+gh_repo
+    if os.path.exists(repo_folder):
+        shutil.rmtree(repo_folder)
 
     # get the data from GitHub api
     req = requests.get(gh_api_url)
@@ -162,6 +168,10 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     meta = dict(mediatype=mediatype, creator=uploader_name, collection=collection, title=title, year=year, date=date, \
            subject=subject, uploaded_with=uploader, originalurl=originalurl, pushed_date=raw_pushed_date, description=description)
 
+    # override default metadata with any supplemental metadata provided.
+    if custom_meta != None:
+        meta.update(custom_meta)
+
     try:
         # upload the item to the Internet Archive
         print(("Creating item on Internet Archive: %s") % meta['title'])
@@ -191,12 +201,22 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
 
 def main():
     URL = args.githuburl
+    custom_metadata = args.metadata
+    md = None
+    custom_meta_dict = None
 
     print((":: Downloading %s repository...") % URL)
     gh_repo_data, repo_folder = repo_download(URL)
 
+    # parse supplemental metadata.
+    if custom_metadata != None:
+        custom_meta_dict = {}
+        for meta in custom_metadata.split(','):
+            k, v = meta.split(':')
+            custom_meta_dict[k] = v
+
     # upload the repo on IA
-    identifier, meta, bundle_filename= upload_ia(repo_folder, gh_repo_data)
+    identifier, meta, bundle_filename= upload_ia(repo_folder, gh_repo_data, custom_meta=custom_meta_dict)
 
     # cleaning
     shutil.rmtree(repo_folder)

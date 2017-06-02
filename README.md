@@ -34,7 +34,11 @@ Configure internetarchive with your Internet Archive account:
 
 ## Usage
 
-        python iagitup.py [-h] --githuburl/-u GITHUBURL
+        python iagitup.py [-h] --githuburl/-u <github_repo_url>
+
+you can add custom metadata using the argument _metadata_:
+
+        python iagitup.py [-h] --githuburl/-u <github_repo_url> --metadata=<key:value,key2:val2>
 
 as example:
 
