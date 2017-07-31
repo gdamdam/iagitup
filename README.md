@@ -8,6 +8,7 @@ The upload is enriched with metadata from the github api and the README.md
 
 Prerequisites (with debian or ubuntu):
 
+    apt update && apt upgrade
     apt install python python-dev python-virtualenv libffi-dev libssl-dev git
 
 Clone the repo and create the virtualenv and all things...
@@ -32,15 +33,15 @@ Configure internetarchive with your Internet Archive account:
 
 ## Usage
 
-        python iagitup.py [-h] --githuburl/-u <github_repo_url>
+        ./iagitup.py [-h] --githuburl/-u <github_repo_url>
 
 you can add also custom metadata:
 
-        python iagitup.py [-h] --githuburl/-u <github_repo_url> --metadata=<key:value,key2:val2>
+        ./iagitup.py [-h] --githuburl/-u <github_repo_url> --metadata=<key:value,key2:val2>
 
 as example:
 
-        python iagitup.py -u https://github.com/<GITHUBUSER>/<RESPOSITORY>
+        ./iagitup.py -u https://github.com/<GITHUBUSER>/<RESPOSITORY>
 
 The script downloads the git repo from github, creates a git bundle and uploads it on the Internet Archive.
 
