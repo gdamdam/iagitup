@@ -8,13 +8,11 @@ The upload is enriched with metadata from the github api and the README.md
 
 Prerequisites (with debian or ubuntu):
 
-    apt-get install python python-dev python-virtualenv 
-    apt-get install libffi-dev libssl-dev  git
+    apt install python python-dev python-virtualenv libffi-dev libssl-dev git
 
 Clone the repo and create the virtualenv and all things...
 
-    git clone https://github.com/gdamdam/iagitup.git
-    cd iagitup
+    git clone https://github.com/gdamdam/iagitup.git ; cd iagitup
 
 create the virtualenv:
 
