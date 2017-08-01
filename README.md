@@ -8,7 +8,7 @@ The upload is enriched with metadata from the github api and the README.md
 
 Prerequisites (with debian or ubuntu):
 
-    apt update && apt upgrade
+    apt update 
     apt install python python-dev python-virtualenv libffi-dev libssl-dev git
 
 Clone the repo and create the virtualenv and all things...
