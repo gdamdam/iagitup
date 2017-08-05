@@ -51,7 +51,7 @@ The repo will be archived in an item at url containing the repository name and t
 
 The git repo bundle will be available at url:
 
-    https://archive.org/download/github.com-<GITHUBUSER>-<RESPOSITORY>_-_<DATE-LAST-PUSH>/<BUNDLENAME>.bundle
+    https://archive.org/download/github-<GITHUBUSER>-<RESPOSITORY>_-_<DATE-LAST-PUSH>/<BUNDLENAME>.bundle
 
 ## Restore an archived github repository
 

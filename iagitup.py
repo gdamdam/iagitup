@@ -161,7 +161,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
 
     # inizializing the internet archive item name
     # here we set the ia identifier
-    itemname = '%s-%s_-_%s' % ('github.com', repo_name, pushed_date)
+    itemname = '%s-%s_-_%s' % ('github', repo_name, pushed_date)
     title = '%s' % (itemname)
 
     #initializing the main metadata
