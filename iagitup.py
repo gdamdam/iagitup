@@ -179,7 +179,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
         # checking if the item already exists:
         if not item.exists:
             print(("Uploading file to the internet archive: %s") % bundle_file)
-            item.upload(bundle_file, metadata=meta, retries=9001, request_kwargs=dict(timeout=9001), delete=False)
+            item.upload(bundle_file, metadata=meta, headers={'x-archive-keep-old-version': '1'}, retries=9001, request_kwargs=dict(timeout=9001), delete=True)
             # upload the item to the Internet Archive
             print("Uploading avatar...")
             item.upload('{}/cover.jpg'.format(gh_repo_folder), retries=9001, request_kwargs=dict(timeout=9001), delete=True)
