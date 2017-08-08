@@ -2,11 +2,12 @@
 
 A small tool to archive a GitHub repository on the Internet Archive.
 The script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on archive.org
+
 The upload is enriched with metadata from the github api and the README.md
 
 ## Install
 
-Prerequisites (with debian or ubuntu):
+Prerequisites (with Debian or Ubuntu):
 
     apt update 
     apt install python python-dev python-virtualenv libffi-dev libssl-dev git
@@ -15,18 +16,18 @@ Clone the repo and create the virtualenv and all things...
 
     git clone https://github.com/gdamdam/iagitup.git ; cd iagitup
 
-create the virtualenv:
+Create the virtualenv:
 
     virtualenv venv
     source venv/bin/activate
 
-install the requirements:
+Install the requirements:
 
     pip install -r requirements.txt
 
 If you don't already have an Internet Archive account, [register for one](https://archive.org/account/login.createaccount.php) to give the script upload privileges.
 
-Configure internetarchive with your Internet Archive account:
+Configure `internetarchive` with your Internet Archive login details:
 
         ia configure
 
@@ -35,11 +36,11 @@ Configure internetarchive with your Internet Archive account:
 
         ./iagitup.py [-h] --githuburl/-u <github_repo_url>
 
-you can add also custom metadata:
+You can add also custom metadata:
 
         ./iagitup.py [-h] --githuburl/-u <github_repo_url> --metadata=<key:value,key2:val2>
 
-as example:
+Example:
 
         ./iagitup.py -u https://github.com/<GITHUBUSER>/<RESPOSITORY>
 
