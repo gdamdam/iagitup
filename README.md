@@ -23,7 +23,7 @@ Create the virtualenv:
 
 Install the requirements:
 
-    sudo pip install -r requirements.txt
+    pip install -r requirements.txt
 
 If you don't already have an Internet Archive account, [register for one](https://archive.org/account/login.createaccount.php) to give the script upload privileges.
 
