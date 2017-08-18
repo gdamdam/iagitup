@@ -9,8 +9,8 @@ The upload is enriched with metadata from the github api and the README.md
 
 Prerequisites (with Debian or Ubuntu):
 
-    apt update 
-    apt install python python-dev python-virtualenv libffi-dev libssl-dev git
+    sudo apt update 
+    sudo apt install python python-dev python-virtualenv libffi-dev libssl-dev git
 
 Clone the repo and create the virtualenv and all things...
 
@@ -23,7 +23,7 @@ Create the virtualenv:
 
 Install the requirements:
 
-    pip install -r requirements.txt
+    sudo pip install -r requirements.txt
 
 If you don't already have an Internet Archive account, [register for one](https://archive.org/account/login.createaccount.php) to give the script upload privileges.
 
