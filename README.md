@@ -61,7 +61,7 @@ Download the bundle file, form the archived item:
     https://archive.org/download/.../<ARCHIVED_REPO>.bundle
 Just download the _.bundle_ file and run:
 
-     git clone file.bundle -b master
+     git clone file.bundle 
 
 
 
