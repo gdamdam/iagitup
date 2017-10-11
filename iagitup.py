@@ -104,7 +104,7 @@ def create_bundle(gh_repo_folder, repo_name):
         main_pwd = os.getcwd()
         os.chdir(gh_repo_folder)
         bundle_name = '{}.bundle'.format(repo_name)
-        subprocess.check_call(['git','bundle','create', bundle_name, 'master'])
+        subprocess.check_call(['git','bundle','create', bundle_name, '--all'])
         bundle_path = '{}/{}'.format(gh_repo_folder,bundle_name)
         os.chdir(main_pwd)
     else:
@@ -127,7 +127,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     bundle_filename = '{}_-_{}'.format(repo_name,pushed_date)
 
     # preparing some description
-    description_footer = 'To restore the repository download the bundle <tt>{0}.bundle</tt> and run: <pre><code> git clone {0}.bundle -b master </code></pre>'.format(bundle_filename)
+    description_footer = 'To restore the repository download the bundle <pre><code>wget https://archive.org/download/github.com-{0}/{0}.bundle</code></pre> and run: <pre><code> git clone {0}.bundle </code></pre>'.format(bundle_filename)
     description = '<br/> {0} <br/><br/> {1} <br/>{2}'.format(gh_repo_data['description'],get_description_from_readme(gh_repo_folder),description_footer)
 
     # preparing uploader metadata
@@ -179,7 +179,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
         # checking if the item already exists:
         if not item.exists:
             print(("Uploading file to the internet archive: %s") % bundle_file)
-            item.upload(bundle_file, metadata=meta, headers={'x-archive-keep-old-version': '1'}, retries=9001, request_kwargs=dict(timeout=9001), delete=True)
+            item.upload(bundle_file, metadata=meta, retries=9001, request_kwargs=dict(timeout=9001), delete=False)
             # upload the item to the Internet Archive
             print("Uploading avatar...")
             item.upload('{}/cover.jpg'.format(gh_repo_folder), retries=9001, request_kwargs=dict(timeout=9001), delete=True)
