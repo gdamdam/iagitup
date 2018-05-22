@@ -34,15 +34,15 @@ Configure `internetarchive` with your Internet Archive login details:
 
 ## Usage
 
-        ./iagitup.py [-h] --githuburl/-u <github_repo_url>
+        ./iagitup.py [-h] <github_repo_url>
 
 You can add also custom metadata:
 
-        ./iagitup.py [-h] --githuburl/-u <github_repo_url> --metadata=<key:value,key2:val2>
+        ./iagitup.py [-h] --metadata=<key:value,key2:val2> <github_repo_url> 
 
 Example:
 
-        ./iagitup.py -u https://github.com/<GITHUBUSER>/<RESPOSITORY>
+        ./iagitup.py https://github.com/<GITHUBUSER>/<RESPOSITORY>
 
 The script downloads the git repo from github, creates a git bundle and uploads it on the Internet Archive.
 

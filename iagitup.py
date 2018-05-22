@@ -38,10 +38,15 @@ from datetime import datetime
 from markdown2 import markdown_path
 
 
-# parse and grab the args
-parser = argparse.ArgumentParser(description="iagitup.py: download a github repo and archive it on the Internet Archive\n")
-parser.add_argument('--githuburl', '-u', default=None, type=str, required=True, help="Github's url repository")
+
+PROGRAM_DESCRIPTION = 'A small tool to archive a GitHub repository on the Internet Archive. \
+                       The script downloads the GitHub repository, creates a git bundle and uploads \
+                       it on archive.org in a timestamped item. With nice description and metadata'
+
+# Configure argparser
+parser = argparse.ArgumentParser(description=PROGRAM_DESCRIPTION)
 parser.add_argument('--metadata', '-m', default=None, type=str, required=False, help="Custom metadata to add to the archive.org item.")
+parser.add_argument('gitubeurl', type=str, help='[GITHUB REPO] to archive')
 args = parser.parse_args()
 
 
@@ -200,7 +205,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
 
 
 def main():
-    URL = args.githuburl
+    URL = args.gitubeurl
     custom_metadata = args.metadata
     md = None
     custom_meta_dict = None
