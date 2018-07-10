@@ -9,23 +9,23 @@ The upload is enriched with metadata from the github api and the README.md
 
 Prerequisites (with Debian or Ubuntu):
 
-    sudo apt update 
-    sudo apt install python python-dev python-virtualenv libffi-dev libssl-dev git
+    sudo apt update && sudo apt install python python-dev python-virtualenv libffi-dev libssl-dev git
 
 Clone the repo and create the virtualenv and all things...
 
-    git clone https://github.com/gdamdam/iagitup.git ; cd iagitup
+    git clone https://github.com/gdamdam/iagitup.git && cd iagitup
 
 Create the virtualenv:
 
-    virtualenv venv
-    source venv/bin/activate
+    virtualenv venv && source venv/bin/activate
 
 Install the requirements:
 
-    pip install -r requirements.txt
+    pip install --user -r requirements.txt
 
-If you don't already have an Internet Archive account, [register for one](https://archive.org/account/login.createaccount.php) to give the script upload privileges.
+If you don't already have an Internet Archive account,
+[register for one](https://archive.org/account/login.createaccount.php)
+to give the script upload privileges.
 
 Configure `internetarchive` with your Internet Archive login details:
 
