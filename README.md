@@ -29,20 +29,20 @@ to give the script upload privileges.
 
 Configure `internetarchive` with your Internet Archive login details:
 
-        ia configure
+    ia configure
 
 
 ## Usage
 
-        ./iagitup.py [-h] <github_repo_url>
+    ./iagitup.py [-h] <github_repo_url>
 
 You can add also custom metadata:
 
-        ./iagitup.py [-h] --metadata=<key:value,key2:val2> <github_repo_url> 
+    ./iagitup.py [-h] --metadata=<key:value,key2:val2> <github_repo_url> 
 
 Example:
 
-        ./iagitup.py https://github.com/<GITHUBUSER>/<RESPOSITORY>
+    ./iagitup.py https://github.com/<GITHUBUSER>/<RESPOSITORY>
 
 The script downloads the git repo from github, creates a git bundle and uploads it on the Internet Archive.
 
@@ -61,8 +61,7 @@ Download the bundle file, form the archived item:
     https://archive.org/download/.../<ARCHIVED_REPO>.bundle
 Just download the _.bundle_ file and run:
 
-     git clone file.bundle 
-
+    git clone file.bundle 
 
 
 ## License (GPLv3)
