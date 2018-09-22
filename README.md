@@ -1,7 +1,6 @@
-# iagitup - v1.5 - archive a git repository from GitHub to the Internet Archive
+# iagitup - v1.5 - a python command line tool to archive a GitHub repository to the Internet Archive
 
-A command line tool to archive a git repository from GitHub to the Internet Archive. 
-The script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on an Internet Archive item with metadata from the GitHub API and the README.md
+The python script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on an Internet Archive item with metadata from the GitHub API and a description from the repository readme.
 
 ## Install iagitup
 
@@ -58,6 +57,7 @@ The git repo bundle will be available at url:
 Download the bundle file, form the archived item:
 
     https://archive.org/download/.../<ARCHIVED_REPO>.bundle
+
 Just download the _.bundle_ file and run:
 
     git clone file.bundle
