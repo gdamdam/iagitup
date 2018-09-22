@@ -3,16 +3,6 @@
 A command line tool to archive a git repository from GitHub to the Internet Archive. 
 The script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on an Internet Archive item with metadata from the GitHub API and the README.md
 
-## Before install
-
-If you don't already have an Internet Archive account,
-[register for one](https://archive.org/account/login.createaccount.php)
-to give the script yours upload privileges.
-
-Configure `internetarchive` with your Internet Archive login details:
-
-    ia configure
-
 ## Install iagitup
 
 Prerequisites (with Debian or Ubuntu):
@@ -24,6 +14,16 @@ Clone the repo and install the package...
     git clone https://github.com/gdamdam/iagitup.git
     cd iagitup
     pip install .
+
+## You need an Internet Archive account
+
+If you don't already have an account on archive.org,
+[register](https://archive.org/account/login.createaccount.php)
+to give the script yours upload privileges.
+
+Configure `internetarchive` with your Internet Archive login details typing:
+
+    ia configure
 
 ## Usage
 
