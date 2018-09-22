@@ -15,13 +15,13 @@ Clone the repo and install the package...
     cd iagitup
     pip install .
 
-## You need an Internet Archive account
+## Configure the Internet Archive CLI
 
 If you don't already have an account on archive.org,
 [register](https://archive.org/account/login.createaccount.php)
 to give the script yours upload privileges.
 
-Configure `internetarchive` with your Internet Archive login details typing:
+Configure [internetarchive](https://github.com/jjjake/internetarchive) with your Internet Archive login details typing:
 
     ia configure
 
