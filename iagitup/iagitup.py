@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # iagitup - Download github repository and upload it to the Internet Archive with metadata.
 
-# Copyright (C) 2017 Giovanni Damiola
+# Copyright (C) 2017-2018 Giovanni Damiola
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -19,16 +19,15 @@
 from __future__ import unicode_literals
 
 __author__     = "Giovanni Damiola"
-__copyright__  = "Copyright 2017, Giovanni Damiola"
+__copyright__  = "Copyright 2018, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
-__version__    = "v1.2"
+__version__    = "v1.5"
 
 import os
 import sys
 import subprocess
 import shutil
-import argparse
 import json
 import internetarchive
 import internetarchive.cli
@@ -36,18 +35,6 @@ import git
 import requests
 from datetime import datetime
 from markdown2 import markdown_path
-
-
-
-PROGRAM_DESCRIPTION = 'A small tool to archive a GitHub repository on the Internet Archive. \
-                       The script downloads the GitHub repository, creates a git bundle and uploads \
-                       it on archive.org in a timestamped item. With nice description and metadata'
-
-# Configure argparser
-parser = argparse.ArgumentParser(description=PROGRAM_DESCRIPTION)
-parser.add_argument('--metadata', '-m', default=None, type=str, required=False, help="Custom metadata to add to the archive.org item.")
-parser.add_argument('gitubeurl', type=str, help='[GITHUB REPO] to archive')
-args = parser.parse_args()
 
 
 def mkdirs(path):
@@ -203,35 +190,3 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     # return item identifier and metadata as output
     return itemname, meta, bundle_filename
 
-
-def main():
-    URL = args.gitubeurl
-    custom_metadata = args.metadata
-    md = None
-    custom_meta_dict = None
-
-    print((":: Downloading %s repository...") % URL)
-    gh_repo_data, repo_folder = repo_download(URL)
-
-    # parse supplemental metadata.
-    if custom_metadata != None:
-        custom_meta_dict = {}
-        for meta in custom_metadata.split(','):
-            k, v = meta.split(':')
-            custom_meta_dict[k] = v
-
-    # upload the repo on IA
-    identifier, meta, bundle_filename= upload_ia(repo_folder, gh_repo_data, custom_meta=custom_meta_dict)
-
-    # cleaning
-    shutil.rmtree(repo_folder)
-
-    # output
-    print(("\n:: Upload FINISHED. Item information:"))
-    print(("Title: %s") % meta['title'])
-    print(("Archived repository URL: \n \thttps://archive.org/details/%s") % identifier)
-    print("Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(identifier,bundle_filename))
-
-
-if __name__ == '__main__':
-    main()

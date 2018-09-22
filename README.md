@@ -1,48 +1,45 @@
-# iagitup.py - v1.2 - archive a github repository on archive.org
+# iagitup.py - v1.5 - archive a github repository to the Internet Archive
 
-A small tool to archive a GitHub repository on the Internet Archive.
+A tool to archive a GitHub repository on the Internet Archive.
 The script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on archive.org
 
 The upload is enriched with metadata from the github api and the README.md
 
-## Install
-
-Prerequisites (with Debian or Ubuntu):
-
-    sudo apt update && sudo apt install python python-dev python-virtualenv libffi-dev libssl-dev git
-
-Clone the repo and create the virtualenv and all things...
-
-    git clone https://github.com/gdamdam/iagitup.git && cd iagitup
-
-Create the virtualenv:
-
-    virtualenv venv && source venv/bin/activate
-
-Install the requirements:
-
-    pip install --user -r requirements.txt
+## Before install
 
 If you don't already have an Internet Archive account,
 [register for one](https://archive.org/account/login.createaccount.php)
-to give the script upload privileges.
+to give the script yours upload privileges.
 
 Configure `internetarchive` with your Internet Archive login details:
 
     ia configure
 
+## Install iagitup
+
+Prerequisites (with Debian or Ubuntu):
+
+    sudo apt update && sudo apt install python python-dev libffi-dev libssl-dev git
+
+Clone the repo and create the virtualenv and all things...
+
+    git clone https://github.com/gdamdam/iagitup.git
+    cd iagitup
+    pip install .
 
 ## Usage
 
-    ./iagitup.py [-h] <github_repo_url>
+To upload a repo:
+
+    iagitup  <github_repo_url>
 
 You can add also custom metadata:
 
-    ./iagitup.py [-h] --metadata=<key:value,key2:val2> <github_repo_url> 
+    iagitup --metadata=<key:value,key2:val2> <github_repo_url>
 
 Example:
 
-    ./iagitup.py https://github.com/<GITHUBUSER>/<RESPOSITORY>
+    iagitup https://github.com/<GITHUBUSER>/<RESPOSITORY>
 
 The script downloads the git repo from github, creates a git bundle and uploads it on the Internet Archive.
 
@@ -61,12 +58,12 @@ Download the bundle file, form the archived item:
     https://archive.org/download/.../<ARCHIVED_REPO>.bundle
 Just download the _.bundle_ file and run:
 
-    git clone file.bundle 
+    git clone file.bundle
 
 
 ## License (GPLv3)
 
-Copyright (C) 2017 Giovanni Damiola
+Copyright (C) 2017-2018 Giovanni Damiola
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
