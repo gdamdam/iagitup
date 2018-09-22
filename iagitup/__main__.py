@@ -32,9 +32,9 @@ import json
 
 import iagitup
 
-PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository on the Internet Archive. \
+PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository to the Internet Archive. \
                        The script downloads the GitHub repository, creates a git bundle and uploads \
-                       it on archive.org in a timestamped item. With nice description and metadata.'
+                       it to archive.org.'
 
 # Configure argparser
 parser = argparse.ArgumentParser(description=PROGRAM_DESCRIPTION)
