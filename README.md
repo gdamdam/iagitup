@@ -1,9 +1,7 @@
 # iagitup - v1.5 - archive a git repository from GitHub to the Internet Archive
 
-A tool to archive a GitHub repository on the Internet Archive.
-The script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on archive.org
-
-The upload is enriched with metadata from the github api and the README.md
+A command line tool to archive a git repository from GitHub to the Internet Archive. 
+The script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on an Internet Archive item with metadata from the GitHub API and the README.md
 
 ## Before install
 
