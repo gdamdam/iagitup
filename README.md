@@ -1,4 +1,4 @@
-# iagitup.py - v1.5 - archive a github repository to the Internet Archive
+# iagitup - v1.5 - archive a git repository from GitHub to the Internet Archive
 
 A tool to archive a GitHub repository on the Internet Archive.
 The script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on archive.org
@@ -36,6 +36,10 @@ To upload a repo:
 You can add also custom metadata:
 
     iagitup --metadata=<key:value,key2:val2> <github_repo_url>
+
+To know the version:
+
+    iagitup -v
 
 Example:
 

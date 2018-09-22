@@ -38,13 +38,17 @@ PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository on the Internet Arc
 
 # Configure argparser
 parser = argparse.ArgumentParser(description=PROGRAM_DESCRIPTION)
-parser.add_argument('--metadata', '-m', default=None, type=str, required=False, help="Custom metadata to add to the archive.org item")
+parser.add_argument('--metadata', '-m', default=None, type=str, required=False, help="custom metadata to add to the archive.org item.")
+parser.add_argument('--version', '-v', action='version', version=__version__)
 parser.add_argument('gitubeurl', type=str, help='[GITHUB REPO] to archive')
 args = parser.parse_args()
 
-
-
 def main():
+    print args.v
+    if args.v:
+        print __version__
+        exit(0)
+
     URL = args.gitubeurl
     custom_metadata = args.metadata
     md = None
