@@ -21,7 +21,7 @@ Prerequisites (with Debian or Ubuntu):
 
     sudo apt update && sudo apt install python python-dev libffi-dev libssl-dev git
 
-Clone the repo and create the virtualenv and all things...
+Clone the repo and install the package...
 
     git clone https://github.com/gdamdam/iagitup.git
     cd iagitup
