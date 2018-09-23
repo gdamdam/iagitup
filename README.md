@@ -1,28 +1,34 @@
-# iagitup - v1.5 - a python command line tool to archive a GitHub repository to the Internet Archive
+# iagitup - v1.6 - a python command line tool to archive a GitHub repository to the Internet Archive
 
 The python script downloads the GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle) and uploads it on an Internet Archive item with metadata from the GitHub API and a description from the repository readme.
+
+
+## Prerequisites
+This script strongly recommends Linux or some sort of POSIX system (such as Mac OS X).
+
+* **Internet Archive Account** - If you don't already have an account on archive.org, [register](https://archive.org/account/login.createaccount.php).
+* **Python 2.7** - This script requires python 2.7.
+* **libffi-dev and libssl-dev**
+* **git**
 
 ## Install iagitup
 
 Prerequisites (with Debian or Ubuntu):
 
-    sudo apt update && sudo apt install python python-dev libffi-dev libssl-dev git
+    sudo apt update 
+    sudo apt install python python-pip python-dev libffi-dev libssl-dev git
+
+### with pip:
+
+    pip install iagitup
+
+### from source code:
 
 Clone the repo and install the package...
 
     git clone https://github.com/gdamdam/iagitup.git
     cd iagitup
     pip install .
-
-## Configure the Internet Archive CLI
-
-If you don't already have an account on archive.org,
-[register](https://archive.org/account/login.createaccount.php)
-to give the script yours upload privileges.
-
-Configure [internetarchive](https://github.com/jjjake/internetarchive) with your Internet Archive login details typing:
-
-    ia configure
 
 ## Usage
 

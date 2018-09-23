@@ -22,7 +22,8 @@ __author__     = "Giovanni Damiola"
 __copyright__  = "Copyright 2018, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
-__version__    = "v1.5"
+__status__     = "Beta"
+__version__    = "v1.6"
 
 import os
 import sys
@@ -34,7 +35,7 @@ import iagitup
 
 PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository to the Internet Archive. \
                        The script downloads the GitHub repository, creates a git bundle and uploads \
-                       it to archive.org.'
+                       it to archive.org. https://github.com/gdamdam/iagitup'
 
 # Configure argparser
 parser = argparse.ArgumentParser(description=PROGRAM_DESCRIPTION)
@@ -44,6 +45,8 @@ parser.add_argument('gitubeurl', type=str, help='[GITHUB REPO] to archive')
 args = parser.parse_args()
 
 def main():
+    iagitup.check_ia_credentials()
+
     URL = args.gitubeurl
     custom_metadata = args.metadata
     md = None
@@ -67,7 +70,7 @@ def main():
 
     # output
     print(("\n:: Upload FINISHED. Item information:"))
-    print(("Title: %s") % meta['title'])
+    print(("Identifier: %s") % meta['title'])
     print(("Archived repository URL: \n \thttps://archive.org/details/%s") % identifier)
     print("Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(identifier,bundle_filename))
 

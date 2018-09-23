@@ -1,20 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# iagitup - Download github repository and upload it to the Internet Archive with metadata.
-
-# Copyright (C) 2017-2018 Giovanni Damiola
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
 
@@ -22,7 +7,7 @@ __author__     = "Giovanni Damiola"
 __copyright__  = "Copyright 2018, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
-__version__    = "v1.5"
+__version__    = "v1.6"
 
 import os
 import sys
@@ -44,6 +29,14 @@ def mkdirs(path):
 
 # download the github repo
 def repo_download(github_repo_url):
+    """Downloads a GitHub repo locally.
+    
+       arguments:
+            github_repo_url -- the GitHub repo home url
+
+       returns:
+            gh_repo_data, repo_folder - the repo details and the local repo folder
+    """
     download_dir = os.path.expanduser('~/.iagitup/downloads')
     mkdirs(os.path.expanduser('~/.iagitup'))
     mkdirs(download_dir)
@@ -75,8 +68,15 @@ def repo_download(github_repo_url):
     return gh_repo_data, repo_folder
 
 
-# get descripton from readme md
 def get_description_from_readme(gh_repo_folder):
+    """From the GitHub repo returns html description from the README.md or readme.txt
+
+        arguments:  
+                gh_repo_folder -- the repo local folder path 
+
+        returns:
+                description -- html description 
+    """
     path = '{}/{}'.format(gh_repo_folder,'README.md')
     path2 = '{}/{}'.format(gh_repo_folder,'readme.txt')
     description = ''
@@ -89,8 +89,16 @@ def get_description_from_readme(gh_repo_folder):
             description =' '.join(description)
     return description
 
-# greate git repository bundle to upload
 def create_bundle(gh_repo_folder, repo_name):
+    """creates the gir repository bundle to upload
+        
+        arguments:
+            gh_repo_folder  --  the repo local folder path 
+            repo_name       --  the repo name
+
+        returns:
+            bundle_path     --  the path to the bundle file
+    """
     print gh_repo_folder, repo_name
     if os.path.exists(gh_repo_folder):
         main_pwd = os.getcwd()
@@ -103,8 +111,19 @@ def create_bundle(gh_repo_folder, repo_name):
         raise ValueError('Error creating bundle, directory does not exist: {}'.format(gh_repo_folder))
     return bundle_path
 
-# upload a video to the Internet Archive
 def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
+    """Uploads the bundle to the Internet Archive.
+
+        arguments:
+                gh_repo_folder  -- path to the bundle
+                gh_repo_data    -- repository metadata
+                custom_meta     -- custom metadata
+
+        returns:
+                itemname        -- Internet Archive item identifier
+                meta            -- the item metadata
+                bundle_filename -- the git bundle filename
+    """
     # formatting some dates string
     d = datetime.strptime(gh_repo_data['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     pushed = datetime.strptime(gh_repo_data['pushed_at'], '%Y-%m-%dT%H:%M:%SZ')
@@ -189,4 +208,26 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
 
     # return item identifier and metadata as output
     return itemname, meta, bundle_filename
+
+def check_ia_credentials():
+    """checks if the internet archive credentials are present.
+
+        returns:
+            exit(1) if there are no local credentialas.
+    """
+    filename = os.path.expanduser('~/.ia')
+    filename2 = os.path.expanduser('~/.config/ia.ini')
+    if not os.path.exists(filename) and not os.path.exists(filename2):
+        msg = '\nWARNING - It looks like you need to configure your Internet Archive account!\n \
+        for registation go to https://archive.org/account/login.createaccount.php\n'
+        print(msg)
+        try:
+            noauth = subprocess.call(["ia", "configure"])
+            if noauth:
+                exit(1)
+        except Exception as e:
+            msg = 'Something went wrong trying to configure your internet archive account.\n Error - {}'.format(str(e))
+            exit(1)
+
+
 
