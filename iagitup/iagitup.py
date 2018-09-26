@@ -7,7 +7,7 @@ __author__     = "Giovanni Damiola"
 __copyright__  = "Copyright 2018, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
-__version__    = "v1.6"
+__version__    = "v1.6.2"
 
 import os
 import sys
@@ -30,7 +30,7 @@ def mkdirs(path):
 # download the github repo
 def repo_download(github_repo_url):
     """Downloads a GitHub repo locally.
-    
+
        arguments:
             github_repo_url -- the GitHub repo home url
 
@@ -71,17 +71,21 @@ def repo_download(github_repo_url):
 def get_description_from_readme(gh_repo_folder):
     """From the GitHub repo returns html description from the README.md or readme.txt
 
-        arguments:  
-                gh_repo_folder -- the repo local folder path 
+        arguments:
+                gh_repo_folder -- the repo local folder path
 
         returns:
-                description -- html description 
+                description -- html description
     """
     path = '{}/{}'.format(gh_repo_folder,'README.md')
+    path3 = '{}/{}'.format(gh_repo_folder,'readme.md')
     path2 = '{}/{}'.format(gh_repo_folder,'readme.txt')
     description = ''
     if os.path.exists(path):
         description = markdown_path(path)
+        description = description.replace('\n','')
+    elif os.path.exists(path3):
+        description = markdown_path(path3)
         description = description.replace('\n','')
     elif os.path.exists(path2):
         with open(path2,'r') as f:
@@ -91,9 +95,9 @@ def get_description_from_readme(gh_repo_folder):
 
 def create_bundle(gh_repo_folder, repo_name):
     """creates the gir repository bundle to upload
-        
+
         arguments:
-            gh_repo_folder  --  the repo local folder path 
+            gh_repo_folder  --  the repo local folder path
             repo_name       --  the repo name
 
         returns:
@@ -228,6 +232,3 @@ def check_ia_credentials():
         except Exception as e:
             msg = 'Something went wrong trying to configure your internet archive account.\n Error - {}'.format(str(e))
             exit(1)
-
-
-

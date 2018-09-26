@@ -6,7 +6,7 @@ def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 setup(name='iagitup',
-      version='1.6',
+      version='1.6.2',
       author='Giovanni Damiola',
       url='https://github.com/gdamdam/iagitup',
       license = "GNU General Public License v3.0",
