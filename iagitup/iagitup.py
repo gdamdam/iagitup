@@ -59,8 +59,8 @@ def repo_download(github_repo_url):
         try:
             git.Git().clone(gh_repo_data['clone_url'],repo_folder)
         except Exception as e:
-            print 'Error occurred while downloading: {}'.format(github_repo_url)
-            print str(e)
+            print('Error occurred while downloading: {}'.format(github_repo_url))
+            print(str(e))
             exit(1)
     else:
         raise ValueError('Error occurred while downloading: {}'.format(github_repo_url))
@@ -103,7 +103,7 @@ def create_bundle(gh_repo_folder, repo_name):
         returns:
             bundle_path     --  the path to the bundle file
     """
-    print gh_repo_folder, repo_name
+    print(gh_repo_folder, repo_name)
     if os.path.exists(gh_repo_folder):
         main_pwd = os.getcwd()
         os.chdir(gh_repo_folder)
@@ -170,7 +170,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     try:
         bundle_file = create_bundle(gh_repo_folder, bundle_filename)
     except ValueError as err:
-        print str(err)
+        print(str(err))
         shutil.rmtree(gh_repo_folder)
         exit(1)
 
@@ -206,7 +206,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
             exit(0)
 
     except Exception as e:
-        print str(e)
+        print(str(e))
         shutil.rmtree(gh_repo_folder)
         exit(1)
 

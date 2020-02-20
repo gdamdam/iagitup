@@ -23,7 +23,7 @@ __copyright__  = "Copyright 2018, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
 __status__     = "Beta"
-__version__    = "v1.6.2"
+__version__    = "v2.0-rc1"
 
 import os
 import sys
