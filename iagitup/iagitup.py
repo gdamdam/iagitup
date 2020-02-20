@@ -7,25 +7,20 @@ __author__     = "Giovanni Damiola"
 __copyright__  = "Copyright 2018, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
-__version__    = "v1.6.2"
+__version__    = "v2.0-rc1"
 
 import os
 import sys
 import subprocess
 import shutil
 import json
+import tempfile
 import internetarchive
 import internetarchive.cli
 import git
 import requests
 from datetime import datetime
 from markdown2 import markdown_path
-
-
-def mkdirs(path):
-	"""Make directory, if it doesn't exist."""
-	if not os.path.exists(path):
-		os.makedirs(path)
 
 # download the github repo
 def repo_download(github_repo_url):
@@ -37,9 +32,7 @@ def repo_download(github_repo_url):
        returns:
             gh_repo_data, repo_folder - the repo details and the local repo folder
     """
-    download_dir = os.path.expanduser('~/.iagitup/downloads')
-    mkdirs(os.path.expanduser('~/.iagitup'))
-    mkdirs(download_dir)
+    download_dir = tempfile.mkdtemp()
 
     # parsing url to initialize the github api rul and get the repo_data
     gh_user, gh_repo = github_repo_url.split('/')[3:]
