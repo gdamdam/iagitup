@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # iagitup - Download github repository and upload it to the Internet Archive with metadata.
 
-# Copyright (C) 2017-2018 Giovanni Damiola
+# Copyright (C) 2018-2020 Giovanni Damiola
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -31,7 +31,7 @@ import shutil
 import argparse
 import json
 
-from iagitup import iagitup 
+from iagitup import iagitup
 
 PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository to the Internet Archive. \
                        The script downloads the GitHub repository, creates a git bundle and uploads \

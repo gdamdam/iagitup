@@ -7,7 +7,7 @@ The python script downloads the GitHub repository, creates a [git bundle](https:
 This script strongly recommends Linux or some sort of POSIX system (such as Mac OS X).
 
 * **Internet Archive Account** - If you don't already have an account on archive.org, [register](https://archive.org/account/login.createaccount.php).
-* **Python 3** 
+* **Python 3.7.5** 
 * **libffi-dev and libssl-dev**
 * **git**
 
