@@ -15,6 +15,7 @@ import subprocess
 import shutil
 import json
 import tempfile
+import configparser
 import internetarchive
 import internetarchive.cli
 import git
@@ -108,7 +109,7 @@ def create_bundle(gh_repo_folder, repo_name):
         raise ValueError('Error creating bundle, directory does not exist: {}'.format(gh_repo_folder))
     return bundle_path
 
-def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
+def upload_ia(gh_repo_folder, gh_repo_data, S3ACCESS=None, S3SECRET=None, custom_meta=None):
     """Uploads the bundle to the Internet Archive.
 
         arguments:
@@ -183,7 +184,8 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     try:
         # upload the item to the Internet Archive
         print(("Creating item on Internet Archive: %s") % meta['title'])
-        item = internetarchive.get_item(itemname)
+        iasession = internetarchive.get_session(config={'s3': {'access': S3ACCESS,'secret': S3SECRET}})
+        item = iasession.get_item(itemname)
         # checking if the item already exists:
         if not item.exists:
             print(("Uploading file to the internet archive: %s") % bundle_file)
@@ -206,7 +208,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     # return item identifier and metadata as output
     return itemname, meta, bundle_filename
 
-def check_ia_credentials():
+def get_ia_credentials():
     """checks if the internet archive credentials are present.
 
         returns:
@@ -225,4 +227,13 @@ def check_ia_credentials():
         except Exception as e:
             msg = 'Something went wrong trying to configure your internet archive account.\n Error - {}'.format(str(e))
             print(msg)
-			exit(1)
+            exit(1)
+    else:
+        config = configparser.ConfigParser()
+        if os.path.exists(filename):
+            config.read(filename)
+        elif os.path.exists(filename2):
+            config.read(filename2)
+        S3ACCESS = config['s3']['access']
+        S3SECRET = config['s3']['secret']
+        return S3ACCESS, S3SECRET

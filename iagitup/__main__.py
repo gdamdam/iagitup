@@ -45,7 +45,7 @@ parser.add_argument('gitubeurl', type=str, help='[GITHUB REPO] to archive')
 args = parser.parse_args()
 
 def main():
-    iagitup.check_ia_credentials()
+    S3ACCESS, S3SECRET = iagitup.get_ia_credentials()
 
     URL = args.gitubeurl
     custom_metadata = args.metadata
@@ -63,7 +63,7 @@ def main():
             custom_meta_dict[k] = v
 
     # upload the repo on IA
-    identifier, meta, bundle_filename= iagitup.upload_ia(repo_folder, gh_repo_data, custom_meta=custom_meta_dict)
+    identifier, meta, bundle_filename= iagitup.upload_ia(repo_folder, gh_repo_data, S3ACCESS=S3ACCESS, S3SECRET=S3SECRET, custom_meta=custom_meta_dict)
 
     # cleaning
     shutil.rmtree(repo_folder)
@@ -77,4 +77,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
