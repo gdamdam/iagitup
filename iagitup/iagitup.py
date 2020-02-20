@@ -224,4 +224,5 @@ def check_ia_credentials():
                 exit(1)
         except Exception as e:
             msg = 'Something went wrong trying to configure your internet archive account.\n Error - {}'.format(str(e))
-            exit(1)
+            print(msg)
+			exit(1)
