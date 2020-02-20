@@ -1,0 +1,4 @@
+- add download wiki bundle if a wiki exists
+- upload the wiki in the same item
+- add link to wiki bundle to the item description
+- add metadata about wiki
