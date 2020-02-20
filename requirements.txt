@@ -3,6 +3,7 @@ args
 asn1crypto
 cffi
 clint
+configparser
 cryptography
 docopt
 enum34
