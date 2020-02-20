@@ -6,7 +6,7 @@ def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 setup(name='iagitup',
-      version='1.6.2',
+      version='2.0',
       author='Giovanni Damiola',
       url='https://github.com/gdamdam/iagitup',
       license = "GNU General Public License v3.0",
@@ -22,7 +22,7 @@ setup(name='iagitup',
           'Natural Language :: English',
           'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
           'Programming Language :: Python',
-          'Programming Language :: Python :: 2.7'
+          'Programming Language :: Python :: 3.7.5'
       ],
       entry_points={
             'console_scripts': [

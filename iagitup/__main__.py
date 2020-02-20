@@ -19,11 +19,11 @@
 from __future__ import unicode_literals
 
 __author__     = "Giovanni Damiola"
-__copyright__  = "Copyright 2018, Giovanni Damiola"
+__copyright__  = "Copyright 2018-2020, Giovanni Damiola"
 __main_name__  = 'iagitup'
 __license__    = 'GPLv3'
 __status__     = "Beta"
-__version__    = "v2.0-rc1"
+__version__    = "v2.0"
 
 import os
 import sys
