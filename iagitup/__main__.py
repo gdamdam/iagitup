@@ -31,7 +31,7 @@ import shutil
 import argparse
 import json
 
-import iagitup
+from iagitup import iagitup 
 
 PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository to the Internet Archive. \
                        The script downloads the GitHub repository, creates a git bundle and uploads \
