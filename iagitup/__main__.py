@@ -31,7 +31,7 @@ import shutil
 import argparse
 import json
 
-import iagitup
+from . import iagitup
 
 PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository to the Internet Archive. \
                        The script downloads the GitHub repository, creates a git bundle and uploads \
@@ -52,7 +52,7 @@ def main():
     md = None
     custom_meta_dict = None
 
-    print((":: Downloading %s repository...") % URL)
+    print(":: Downloading %s repository..." % URL)
     gh_repo_data, repo_folder = iagitup.repo_download(URL)
 
     # parse supplemental metadata.
@@ -69,10 +69,10 @@ def main():
     shutil.rmtree(repo_folder)
 
     # output
-    print(("\n:: Upload FINISHED. Item information:"))
-    print(("Identifier: %s") % meta['title'])
-    print(("Archived repository URL: \n \thttps://archive.org/details/%s") % identifier)
-    print("Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(identifier,bundle_filename))
+    print("\n:: Upload FINISHED. Item information:")
+    print("Identifier: %s" % meta['title'])
+    print("Archived repository URL: \n \thttps://archive.org/details/%s" % identifier)
+    print("Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(identifier, bundle_filename))
 
 
 if __name__ == '__main__':
