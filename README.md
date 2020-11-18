@@ -18,9 +18,6 @@ Prerequisites (with Debian or Ubuntu):
     sudo apt update 
     sudo apt install python python-pip python-dev libffi-dev libssl-dev git
 
-### with pip:
-
-    pip install iagitup
 
 ### from source code:
 
