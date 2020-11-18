@@ -23,9 +23,9 @@ from markdown2 import markdown_path
 
 
 def mkdirs(path):
-	"""Make directory, if it doesn't exist."""
-	if not os.path.exists(path):
-		os.makedirs(path)
+    """Make directory, if it doesn't exist."""
+    if not os.path.exists(path):
+        os.makedirs(path)
 
 # download the github repo
 def repo_download(github_repo_url):
@@ -43,10 +43,10 @@ def repo_download(github_repo_url):
 
     # parsing url to initialize the github api rul and get the repo_data
     gh_user, gh_repo = github_repo_url.split('/')[3:]
-    gh_api_url = "https://api.github.com/repos/{}/{}".format(gh_user,gh_repo)
+    gh_api_url = "https://api.github.com/repos/{}/{}".format(gh_user, gh_repo)
 
     # delete the temp directory if exists
-    repo_folder = download_dir+'/'+gh_repo
+    repo_folder = os.path.join(download_dir, gh_repo)
     if os.path.exists(repo_folder):
         shutil.rmtree(repo_folder)
 
@@ -55,12 +55,12 @@ def repo_download(github_repo_url):
     if req.status_code == 200:
         gh_repo_data = json.loads(req.text)
         # download the repo from github
-        repo_folder = '{}/{}'.format(download_dir,gh_repo)
+        repo_folder = os.path.join(download_dir, gh_repo)
         try:
-            git.Git().clone(gh_repo_data['clone_url'],repo_folder)
+            git.Git().clone(gh_repo_data['clone_url'], repo_folder)
         except Exception as e:
-            print 'Error occurred while downloading: {}'.format(github_repo_url)
-            print str(e)
+            print('Error occurred while downloading: {}'.format(github_repo_url))
+            print(str(e))
             exit(1)
     else:
         raise ValueError('Error occurred while downloading: {}'.format(github_repo_url))
@@ -77,18 +77,18 @@ def get_description_from_readme(gh_repo_folder):
         returns:
                 description -- html description
     """
-    path = '{}/{}'.format(gh_repo_folder,'README.md')
-    path3 = '{}/{}'.format(gh_repo_folder,'readme.md')
-    path2 = '{}/{}'.format(gh_repo_folder,'readme.txt')
+    path = os.path.join(gh_repo_folder, 'README.md')
+    path3 = os.path.join(gh_repo_folder, 'readme.md')
+    path2 = os.path.join(gh_repo_folder, 'readme.txt')
     description = ''
     if os.path.exists(path):
         description = markdown_path(path)
-        description = description.replace('\n','')
+        description = description.replace('\n', '')
     elif os.path.exists(path3):
         description = markdown_path(path3)
-        description = description.replace('\n','')
+        description = description.replace('\n', '')
     elif os.path.exists(path2):
-        with open(path2,'r') as f:
+        with open(path2, 'r') as f:
             description = f.readlines()
             description =' '.join(description)
     return description
@@ -103,13 +103,13 @@ def create_bundle(gh_repo_folder, repo_name):
         returns:
             bundle_path     --  the path to the bundle file
     """
-    print gh_repo_folder, repo_name
+    print(gh_repo_folder, repo_name)
     if os.path.exists(gh_repo_folder):
         main_pwd = os.getcwd()
         os.chdir(gh_repo_folder)
         bundle_name = '{}.bundle'.format(repo_name)
-        subprocess.check_call(['git','bundle','create', bundle_name, '--all'])
-        bundle_path = '{}/{}'.format(gh_repo_folder,bundle_name)
+        subprocess.check_call(['git', 'bundle', 'create', bundle_name, '--all'])
+        bundle_path = os.path.join(gh_repo_folder, bundle_name)
         os.chdir(main_pwd)
     else:
         raise ValueError('Error creating bundle, directory does not exist: {}'.format(gh_repo_folder))
@@ -137,13 +137,13 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     year = pushed.year
 
     # preparing some names
-    repo_name = gh_repo_data['full_name'].replace('/','-')
+    repo_name = gh_repo_data['full_name'].replace('/', '-')
     originalurl = gh_repo_data['html_url']
-    bundle_filename = '{}_-_{}'.format(repo_name,pushed_date)
+    bundle_filename = '{}_-_{}'.format(repo_name, pushed_date)
 
     # preparing some description
     description_footer = 'To restore the repository download the bundle <pre><code>wget https://archive.org/download/github.com-{0}/{0}.bundle</code></pre> and run: <pre><code> git clone {0}.bundle </code></pre>'.format(bundle_filename)
-    description = '<br/> {0} <br/><br/> {1} <br/>{2}'.format(gh_repo_data['description'],get_description_from_readme(gh_repo_folder),description_footer)
+    description = '<br/> {0} <br/><br/> {1} <br/>{2}'.format(gh_repo_data['description'], get_description_from_readme(gh_repo_folder), description_footer)
 
     # preparing uploader metadata
     uploader_url = gh_repo_data['owner']['html_url']
@@ -152,8 +152,8 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     # let's grab the avatar too
     uploader_avatar_url = gh_repo_data['owner']['avatar_url']
     pic = requests.get(uploader_avatar_url, stream = True)
-    uploader_avatar_path = '{}/cover.jpg'.format(gh_repo_folder)
-    with open(uploader_avatar_path,'wb') as f:
+    uploader_avatar_path = os.path.join(gh_repo_folder, 'cover.jpg')
+    with open(uploader_avatar_path, 'wb') as f:
         pic.raw.decode_content = True
         shutil.copyfileobj(pic.raw, f)
 
@@ -162,7 +162,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     mediatype = 'software'
     subject = 'GitHub;code;software;git'
 
-    uploader = '{} - {}'.format(__main_name__,__version__)
+    uploader = '{} - {}'.format(__main_name__, __version__)
 
     description = u'{0} <br/><br/>Source: <a href="{1}">{2}</a><br/>Uploader: <a href="{3}">{4}</a><br/>Upload date: {5}'.format(description, originalurl, originalurl, uploader_url, uploader_name, date)
 
@@ -170,7 +170,7 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
     try:
         bundle_file = create_bundle(gh_repo_folder, bundle_filename)
     except ValueError as err:
-        print str(err)
+        print(str(err))
         shutil.rmtree(gh_repo_folder)
         exit(1)
 
@@ -189,24 +189,24 @@ def upload_ia(gh_repo_folder, gh_repo_data, custom_meta=None):
 
     try:
         # upload the item to the Internet Archive
-        print(("Creating item on Internet Archive: %s") % meta['title'])
+        print("Creating item on Internet Archive: %s" % meta['title'])
         item = internetarchive.get_item(itemname)
         # checking if the item already exists:
         if not item.exists:
-            print(("Uploading file to the internet archive: %s") % bundle_file)
+            print("Uploading file to the internet archive: %s" % bundle_file)
             item.upload(bundle_file, metadata=meta, retries=9001, request_kwargs=dict(timeout=9001), delete=False)
             # upload the item to the Internet Archive
             print("Uploading avatar...")
-            item.upload('{}/cover.jpg'.format(gh_repo_folder), retries=9001, request_kwargs=dict(timeout=9001), delete=True)
+            item.upload(os.path.join(gh_repo_folder, 'cover.jpg'), retries=9001, request_kwargs=dict(timeout=9001), delete=True)
         else:
             print("\nSTOP: The same repository seems already archived.")
-            print(("---->>  Archived repository URL: \n \thttps://archive.org/details/%s") % itemname)
-            print("---->>  Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(itemname,bundle_filename))
+            print("---->>  Archived repository URL: \n \thttps://archive.org/details/%s" % itemname)
+            print("---->>  Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(itemname, bundle_filename))
             shutil.rmtree(gh_repo_folder)
             exit(0)
 
     except Exception as e:
-        print str(e)
+        print(str(e))
         shutil.rmtree(gh_repo_folder)
         exit(1)
 
