@@ -94,7 +94,7 @@ def get_description_from_readme(gh_repo_folder):
     return description
 
 def create_bundle(gh_repo_folder, repo_name):
-    """creates the gir repository bundle to upload
+    """creates the git repository bundle to upload
 
         arguments:
             gh_repo_folder  --  the repo local folder path
