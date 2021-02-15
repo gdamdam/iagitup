@@ -43,17 +43,17 @@ To know the version:
 
 Example:
 
-    iagitup https://github.com/<GITHUBUSER>/<RESPOSITORY>
+    iagitup https://github.com/<GITHUBUSER>/<REPOSITORY>
 
 The script downloads the git repo from github, creates a git bundle and uploads it on the Internet Archive.
 
 The repo will be archived in an item at url containing the repository name and the date of the last push, something like:
 
-    https://archive.org/details/github.com-<GITHUBUSER>-<RESPOSITORY>_-_<DATE-LAST-PUSH>
+    https://archive.org/details/github.com-<GITHUBUSER>-<REPOSITORY>_-_<DATE-LAST-PUSH>
 
 The git repo bundle will be available at url:
 
-    https://archive.org/download/github.com-<GITHUBUSER>-<RESPOSITORY>_-_<DATE-LAST-PUSH>/<BUNDLENAME>.bundle
+    https://archive.org/download/github.com-<GITHUBUSER>-<REPOSITORY>_-_<DATE-LAST-PUSH>/<BUNDLENAME>.bundle
 
 ## Restore an archived github repository
 
