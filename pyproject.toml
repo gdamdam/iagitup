@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iagitup"
+version = "3.1.0"
+description = "Archive GitHub repositories to the Internet Archive."
+readme = { file = "README.md", content-type = "text/markdown" }
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Giovanni Damiola" }]
+requires-python = ">=3.10"
+keywords = ["github", "internetarchive", "archiving"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Version Control",
+    "Topic :: System :: Archiving :: Backup",
+]
+dependencies = [
+    "internetarchive>=3.0",
+    "GitPython>=3.1",
+    "requests>=2.28",
+    "markdown2>=2.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/gdamdam/iagitup"
+Repository = "https://github.com/gdamdam/iagitup"
+"Bug Tracker" = "https://github.com/gdamdam/iagitup/issues"
+
+[project.scripts]
+iagitup = "iagitup.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["iagitup*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

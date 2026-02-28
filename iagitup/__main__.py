@@ -1,8 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# iagitup - Download github repository and upload it to the Internet Archive with metadata.
-
-# Copyright (C) 2017-2018 Giovanni Damiola
+#!/usr/bin/env python3
+# iagitup - Archive a GitHub repository to the Internet Archive.
+#
+# Copyright (C) 2018-2026 Giovanni Damiola
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -16,65 +15,85 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-__author__     = "Giovanni Damiola"
-__copyright__  = "Copyright 2018, Giovanni Damiola"
-__main_name__  = 'iagitup'
-__license__    = 'GPLv3'
-__status__     = "Beta"
-__version__    = "v1.6.2"
-
-import os
-import sys
-import shutil
 import argparse
-import json
+import logging
+import shutil
+import sys
 
-import iagitup
+from iagitup.iagitup import (
+    IagitupError,
+    __version__,
+    get_ia_credentials,
+    repo_download,
+    upload_ia,
+)
 
-PROGRAM_DESCRIPTION = 'A tool to archive a GitHub repository to the Internet Archive. \
-                       The script downloads the GitHub repository, creates a git bundle and uploads \
-                       it to archive.org. https://github.com/gdamdam/iagitup'
-
-# Configure argparser
-parser = argparse.ArgumentParser(description=PROGRAM_DESCRIPTION)
-parser.add_argument('--metadata', '-m', default=None, type=str, required=False, help="custom metadata to add to the archive.org item")
-parser.add_argument('--version', '-v', action='version', version=__version__)
-parser.add_argument('gitubeurl', type=str, help='[GITHUB REPO] to archive')
-args = parser.parse_args()
-
-def main():
-    iagitup.check_ia_credentials()
-
-    URL = args.gitubeurl
-    custom_metadata = args.metadata
-    md = None
-    custom_meta_dict = None
-
-    print((":: Downloading %s repository...") % URL)
-    gh_repo_data, repo_folder = iagitup.repo_download(URL)
-
-    # parse supplemental metadata.
-    if custom_metadata != None:
-        custom_meta_dict = {}
-        for meta in custom_metadata.split(','):
-            k, v = meta.split(':')
-            custom_meta_dict[k] = v
-
-    # upload the repo on IA
-    identifier, meta, bundle_filename= iagitup.upload_ia(repo_folder, gh_repo_data, custom_meta=custom_meta_dict)
-
-    # cleaning
-    shutil.rmtree(repo_folder)
-
-    # output
-    print(("\n:: Upload FINISHED. Item information:"))
-    print(("Identifier: %s") % meta['title'])
-    print(("Archived repository URL: \n \thttps://archive.org/details/%s") % identifier)
-    print("Archived git bundle file: \n \thttps://archive.org/download/{0}/{1}.bundle \n\n".format(identifier,bundle_filename))
+PROGRAM_DESCRIPTION = (
+    "Archive a GitHub repository to the Internet Archive. "
+    "Downloads the repo, creates a git bundle, and uploads it to archive.org. "
+    "https://github.com/gdamdam/iagitup"
+)
 
 
-if __name__ == '__main__':
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format=":: %(message)s")
+
+    parser = argparse.ArgumentParser(description=PROGRAM_DESCRIPTION)
+    parser.add_argument(
+        "--metadata", "-m",
+        default=None,
+        type=str,
+        help="Custom metadata as comma-separated key:value pairs (e.g. foo:bar,baz:qux)",
+    )
+    parser.add_argument("--version", "-v", action="version", version=__version__)
+    parser.add_argument("github_url", type=str, help="GitHub repository URL to archive")
+    args = parser.parse_args()
+
+    try:
+        s3_access, s3_secret = get_ia_credentials()
+    except IagitupError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    custom_meta: dict | None = None
+    if args.metadata is not None:
+        try:
+            custom_meta = dict(pair.split(":", 1) for pair in args.metadata.split(","))
+        except ValueError:
+            print(
+                "Error: --metadata must be formatted as key:value,key2:value2",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    print(f":: Downloading {args.github_url} ...")
+    try:
+        gh_repo_data, repo_folder = repo_download(args.github_url)
+    except IagitupError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        identifier, meta, bundle_stem = upload_ia(
+            repo_folder,
+            gh_repo_data,
+            s3_access=s3_access,
+            s3_secret=s3_secret,
+            custom_meta=custom_meta,
+        )
+    except IagitupError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        shutil.rmtree(repo_folder, ignore_errors=True)
+
+    print("\n:: Upload FINISHED.")
+    print(f"   Identifier:          {meta['title']}")
+    print(f"   Archived repository: https://archive.org/details/{identifier}")
+    print(
+        f"   Git bundle:          https://archive.org/download/{identifier}/{bundle_stem}.bundle"
+    )
+
+
+if __name__ == "__main__":
     main()
-

@@ -3,3 +3,8 @@ dist*
 build*
 *pyc
 *egg-info
+.DS_Store
+watchlist_state.json
+watchlist.log
+__pycache__/
+.pytest_cache/
