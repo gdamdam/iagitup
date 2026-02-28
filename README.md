@@ -1,12 +1,41 @@
-# iagitup — archive a GitHub repository to the Internet Archive
+# iagitup — archive GitHub repositories to the Internet Archive
 
-Downloads a GitHub repository, creates a [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to an Internet Archive item with full metadata from the GitHub API and an HTML description from the repository README. If the repository has a wiki, it is bundled and uploaded to the same item.
+`iagitup` downloads a GitHub repository, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the [Internet Archive](https://archive.org) with rich metadata. If the repository has a wiki, that is bundled and uploaded too.
+
+---
+
+## Table of contents
+
+- [Prerequisites](#prerequisites)
+- [Install](#install)
+- [iagitup — single repository](#iagitup--single-repository)
+  - [Basic usage](#basic-usage)
+  - [Options](#options)
+  - [Custom metadata](#custom-metadata)
+  - [GitHub authentication](#github-authentication)
+  - [Internet Archive credentials](#internet-archive-credentials)
+  - [What gets archived](#what-gets-archived)
+  - [IA item structure](#ia-item-structure)
+  - [Duplicate prevention](#duplicate-prevention)
+- [archive_watchlist — bulk archiving](#archive_watchlist--bulk-archiving)
+  - [How it works](#how-it-works)
+  - [Options](#options-1)
+  - [Duplicate prevention](#duplicate-prevention-1)
+  - [Extra metadata](#extra-metadata)
+  - [Cron setup](#cron-setup)
+  - [State file](#state-file)
+- [Restore an archived repository](#restore-an-archived-repository)
+- [License](#license)
+
+---
 
 ## Prerequisites
 
 - Python **3.10+**
-- `git` installed and on `$PATH`
+- `git` on `$PATH`
 - An [Internet Archive account](https://archive.org/account/login.createaccount.php)
+
+---
 
 ## Install
 
@@ -24,94 +53,218 @@ cd iagitup
 pip install .
 ```
 
-## Usage
+---
 
-Archive a single repository:
+## iagitup — single repository
+
+### Basic usage
 
 ```bash
 iagitup <github_repo_url>
 ```
 
-With custom metadata:
-
-```bash
-iagitup --metadata=<key:value,key2:val2> <github_repo_url>
-```
-
 Example:
 
 ```bash
+iagitup https://github.com/torvalds/linux
+```
+
+Output:
+
+```
+:: Downloading https://github.com/torvalds/linux ...
+:: Cloning https://github.com/torvalds/linux.git ...
+:: Uploading bundle: torvalds-linux_-_2026-02-28_10-00-00.bundle
+:: Upload FINISHED.
+   Identifier:          github.com-torvalds-linux_-_2026-02-28_10-00-00
+   Archived repository: https://archive.org/details/github.com-torvalds-linux_-_2026-02-28_10-00-00
+   Git bundle:          https://archive.org/download/github.com-torvalds-linux_-_2026-02-28_10-00-00/torvalds-linux_-_2026-02-28_10-00-00.bundle
+```
+
+### Options
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `github_url` | — | *(required)* | GitHub repository URL to archive |
+| `--metadata` | `-m` | — | Custom metadata fields (see below) |
+| `--version` | `-v` | — | Print version and exit |
+
+### Custom metadata
+
+Pass additional Internet Archive metadata fields as comma-separated `key:value` pairs:
+
+```bash
+iagitup --metadata="subject:python;cli,creator:myorg" https://github.com/user/repo
+```
+
+Custom fields are **merged** into the default metadata. Any key that matches a default field will override it.
+
+### GitHub authentication
+
+Unauthenticated GitHub API calls are rate-limited to **60 requests/hour**. Set `GITHUB_TOKEN` to raise this to **5 000/hour**:
+
+```bash
+export GITHUB_TOKEN=ghp_your_token_here
 iagitup https://github.com/user/repo
 ```
 
-The archived item URL will be:
+Generate a token at <https://github.com/settings/tokens> — no specific scopes are required for public repositories.
 
-```
-https://archive.org/details/github.com-<USER>-<REPO>_-_<DATE-LAST-PUSH>
-```
+### Internet Archive credentials
 
-The git bundle will be at:
+On first run, if no credentials are found, iagitup will prompt you to run `ia configure` interactively. Credentials are stored in `~/.ia` or `~/.config/ia.ini` and re-used on subsequent runs.
 
-```
-https://archive.org/download/github.com-<USER>-<REPO>_-_<DATE-LAST-PUSH>/<BUNDLE>.bundle
-```
-
-### GitHub API rate limits
-
-Unauthenticated requests are limited to 60/hour. Set a `GITHUB_TOKEN` environment variable to raise this to 5 000/hour:
+You can also configure them manually:
 
 ```bash
-export GITHUB_TOKEN=ghp_...
-iagitup https://github.com/user/repo
+ia configure
 ```
 
-## Restore an archived repository
+Or create `~/.ia` directly:
 
-Download the `.bundle` file from the archived item and run:
-
-```bash
-git clone file.bundle
+```ini
+[s3]
+access = YOUR_ACCESS_KEY
+secret = YOUR_SECRET_KEY
 ```
+
+Find your keys at <https://archive.org/account/s3.php>.
+
+### What gets archived
+
+For every repository, iagitup:
+
+1. **Calls the GitHub API** to fetch full repository metadata (`pushed_at`, description, owner, topics, language, …).
+2. **Clones the repository** in full (all branches and tags).
+3. **Downloads the owner's avatar** as a cover image (`cover.jpg`).
+4. **Clones the wiki** (if `has_wiki` is set), concurrently with the avatar download.
+5. **Checks IA for an existing item** with the same identifier — returns early if already archived.
+6. **Creates a git bundle** (`git bundle create --all`) containing every ref.
+7. **Creates a wiki bundle** if the wiki clone succeeded.
+8. **Builds an HTML description** from the repo description + README (`.md` or `.txt`) + restore instructions.
+9. **Uploads** the bundle, cover image, and wiki bundle (if present) to the IA item.
+
+### IA item structure
+
+Each archived repository becomes a single Internet Archive item containing:
+
+| File | Description |
+|---|---|
+| `<bundle_name>.bundle` | Full git bundle (all branches + tags) |
+| `cover.jpg` | Repository owner's avatar |
+| `<bundle_name>_wiki.bundle` | Wiki git bundle *(if wiki exists)* |
+
+**Automatic metadata fields** set on every item:
+
+| Field | Value |
+|---|---|
+| `mediatype` | `software` |
+| `collection` | `open_source_software` |
+| `creator` | GitHub owner login |
+| `title` | IA item identifier |
+| `date` | Last push date (`YYYY-MM-DD`) |
+| `year` | Last push year |
+| `subject` | `GitHub;code;software;git` |
+| `originalurl` | GitHub repository URL |
+| `pushed_date` | Full push timestamp (`YYYY-MM-DD HH:MM:SS`) |
+| `uploaded_with` | `iagitup-vX.X.X` |
+| `description` | HTML: repo description + README + restore instructions |
+
+### Duplicate prevention
+
+The IA item identifier is derived from the repository name and the `pushed_at` timestamp:
+
+```
+github.com-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}
+```
+
+- **Same snapshot**: if `pushed_at` is unchanged the identifier is identical and `iagitup` returns immediately without re-uploading.
+- **New commits**: a different `pushed_at` produces a new identifier and a new IA item — the previous snapshot is preserved.
 
 ---
 
-## archive_watchlist — bulk-archive the top GitHub repositories
+## archive_watchlist — bulk archiving
 
-`archive_watchlist.py` is a companion script that fetches the top-N most-starred repositories from GitHub and archives any that are new or have been updated since the last run.
+`archive_watchlist.py` runs as a single-shot script (scheduled via cron or similar) to continuously archive the **top-N most-starred GitHub repositories**.
 
 ### How it works
 
-1. Queries the GitHub Search API for the top-N repos sorted by stars.
-2. Compares each repo's `pushed_at` timestamp against a local state cache (`watchlist_state.json`).
-3. **Skips** repos unchanged since the last run (fast, no network traffic).
-4. **Archives** new or updated repos via iagitup with extra metadata (stars, forks, language, topics, rank).
-5. Repos are archived **in parallel** using a configurable worker pool.
-6. State is saved to disk after each archive so a crash mid-run doesn't lose progress.
+1. Fetches the top-N repos from the GitHub Search API (sorted by stars).
+2. Compares each repo's `pushed_at` against a local state cache.
+3. **Skips** unchanged repos instantly (no network, no IA call).
+4. **Archives** new or updated repos via iagitup, enriched with popularity metadata.
+5. Repos are processed **in parallel** across a configurable worker pool.
+6. State is saved to disk after each archive — a crash mid-run loses at most one item.
 
-### Duplicate prevention (two layers)
-
-- **Local cache**: `pushed_at` timestamp check — instant skip without cloning or hitting IA.
-- **IA item check**: `upload_ia` checks whether the IA item identifier already exists before doing any heavy work. Since the identifier encodes the `pushed_at` date, the same snapshot is never uploaded twice.
-
-A repo that receives new commits will have a different `pushed_at`, producing a new IA item — preserving the full archive history.
-
-### Usage
+### Options
 
 ```bash
-python archive_watchlist.py                  # archive top 100, 4 parallel workers
-python archive_watchlist.py --top-n 10       # quick test
-python archive_watchlist.py --workers 8      # increase parallelism
-python archive_watchlist.py --dry-run        # preview without uploading
-python archive_watchlist.py --state-file /path/to/state.json
+python archive_watchlist.py [options]
 ```
 
-### Cron example (daily at 03:00)
+| Flag | Default | Description |
+|---|---|---|
+| `--top-n N` | `100` | Number of top repositories to fetch and check (max 100) |
+| `--workers N` | `4` | Number of parallel archive workers |
+| `--dry-run` | off | Preview what would be archived — no uploads, no state changes |
+| `--state-file PATH` | `./watchlist_state.json` | Path to the persistent state cache |
+
+Examples:
+
+```bash
+# Preview the top 10 without uploading
+python archive_watchlist.py --dry-run --top-n 10
+
+# Full run with more parallelism
+python archive_watchlist.py --workers 8
+
+# Use a custom state file
+python archive_watchlist.py --state-file /var/lib/iagitup/state.json
+```
+
+### Duplicate prevention
+
+Two independent layers prevent the same snapshot from being uploaded twice:
+
+| Layer | Where | How |
+|---|---|---|
+| **Local cache** | `archive_watchlist.py` | Compares `pushed_at` to the state file — instant skip, zero network traffic |
+| **IA item check** | `iagitup.upload_ia` | Checks `item.exists` on IA before any heavy work — safe even if the state file is deleted |
+
+A new push changes `pushed_at`, generates a new IA item identifier, and triggers a fresh archive — preserving the full history of snapshots.
+
+### Extra metadata
+
+In addition to the standard iagitup fields, `archive_watchlist` injects:
+
+| Field | Value |
+|---|---|
+| `stars_count` | Stargazer count at time of archive |
+| `forks_count` | Fork count |
+| `watchers_count` | Watcher count |
+| `language` | Primary programming language |
+| `topics` | Semicolon-joined topic list |
+| `github_rank` | Position in the top-N list |
+| `subject` | Extended: base tags + language + topics |
+
+### Cron setup
+
+Add to your crontab (`crontab -e`) to run daily at 03:00:
 
 ```cron
 0 3 * * * cd /path/to/iagitup && python archive_watchlist.py >> watchlist.log 2>&1
 ```
 
-### State file format
+Set `GITHUB_TOKEN` in the cron environment to avoid rate limiting:
+
+```cron
+GITHUB_TOKEN=ghp_your_token_here
+0 3 * * * cd /path/to/iagitup && python archive_watchlist.py >> watchlist.log 2>&1
+```
+
+### State file
+
+The state file (`watchlist_state.json`) tracks the last-seen snapshot of each repository:
 
 ```json
 {
@@ -123,6 +276,27 @@ python archive_watchlist.py --state-file /path/to/state.json
   }
 }
 ```
+
+To force a re-archive of a specific repo, delete its entry from the file or change `pushed_at` to an old value.
+
+---
+
+## Restore an archived repository
+
+1. Find the `.bundle` file in the archived IA item.
+2. Download it:
+
+```bash
+wget https://archive.org/download/<identifier>/<bundle>.bundle
+```
+
+3. Clone from the bundle:
+
+```bash
+git clone <bundle>.bundle my-repo
+```
+
+All branches and tags are preserved in the bundle.
 
 ---
 
