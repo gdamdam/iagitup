@@ -85,7 +85,9 @@ def main() -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     finally:
-        shutil.rmtree(repo_folder, ignore_errors=True)
+        # Clean the entire mkdtemp root (repo + any wiki/ subdir created by
+        # _download_wiki), not just the repo subfolder.
+        shutil.rmtree(repo_folder.parent, ignore_errors=True)
 
     print("\n:: Upload FINISHED.")
     print(f"   Identifier:          {meta['title']}")

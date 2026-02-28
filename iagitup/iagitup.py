@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -56,14 +57,16 @@ class CredentialsError(IagitupError):
 def _parse_github_url(url: str) -> tuple[str, str]:
     """Parse a GitHub URL and return (owner, repo_name).
 
+    Handles trailing slashes and .git suffixes gracefully.
+
     Args:
-        url: GitHub repository URL (with or without trailing slash / .git suffix).
+        url: GitHub repository URL, e.g. https://github.com/owner/repo.git
 
     Returns:
         Tuple of (owner, repo_name).
 
     Raises:
-        RepoDownloadError: If the URL cannot be parsed.
+        RepoDownloadError: If the URL path does not contain both owner and repo.
     """
     parsed = urlparse(url.rstrip("/"))
     parts = [p for p in parsed.path.strip("/").split("/") if p]
@@ -75,7 +78,14 @@ def _parse_github_url(url: str) -> tuple[str, str]:
 
 
 def _github_headers() -> dict[str, str]:
-    """Build request headers, including auth token if available via GITHUB_TOKEN."""
+    """Return HTTP headers for GitHub API requests.
+
+    Includes an Authorization header when the GITHUB_TOKEN environment
+    variable is set, raising the rate limit from 60 to 5 000 req/hour.
+
+    Returns:
+        Dict of HTTP headers.
+    """
     headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
     token = os.environ.get("GITHUB_TOKEN")
     if token:
@@ -88,16 +98,20 @@ def _github_headers() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 def repo_download(github_repo_url: str) -> tuple[dict, Path]:
-    """Download a GitHub repository to a local temp directory.
+    """Download a GitHub repository to a local temporary directory.
+
+    The caller is responsible for cleaning up the *parent* of the returned
+    path (i.e. ``repo_folder.parent``), which is the mkdtemp root and may
+    also contain a ``wiki/`` subdirectory created by ``_download_wiki``.
 
     Args:
         github_repo_url: The GitHub repository URL.
 
     Returns:
-        Tuple of (github_api_metadata, local_repo_path).
+        Tuple of (github_api_metadata_dict, local_repo_path).
 
     Raises:
-        RepoDownloadError: If the API call or clone fails.
+        RepoDownloadError: If the GitHub API call fails or the clone fails.
     """
     owner, repo_name = _parse_github_url(github_repo_url)
     api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
@@ -109,6 +123,9 @@ def repo_download(github_repo_url: str) -> tuple[dict, Path]:
         )
 
     gh_repo_data: dict = resp.json()
+
+    # mkdtemp creates an isolated directory; the wiki (if any) will live
+    # alongside the repo clone inside this same root.
     download_dir = Path(tempfile.mkdtemp())
     repo_folder = download_dir / repo_name
 
@@ -116,6 +133,7 @@ def repo_download(github_repo_url: str) -> tuple[dict, Path]:
     try:
         git.Git().clone(gh_repo_data["clone_url"], str(repo_folder))
     except git.GitCommandError as exc:
+        # Clean the whole temp dir on failure so nothing leaks.
         shutil.rmtree(download_dir, ignore_errors=True)
         raise RepoDownloadError(
             f"Failed to clone {github_repo_url}: {exc}"
@@ -124,15 +142,41 @@ def repo_download(github_repo_url: str) -> tuple[dict, Path]:
     return gh_repo_data, repo_folder
 
 
-def _download_wiki(gh_repo_data: dict, dest_dir: Path) -> Path | None:
-    """Clone the repository wiki if one exists.
+def _download_avatar(avatar_url: str, dest_path: Path) -> Path | None:
+    """Download the repository owner's avatar image to *dest_path*.
 
     Args:
-        gh_repo_data: GitHub API metadata dict.
-        dest_dir: Parent directory in which to place the wiki clone.
+        avatar_url: URL of the avatar image.
+        dest_path: Filesystem path to write the image to.
 
     Returns:
-        Path to the cloned wiki folder, or None if unavailable.
+        *dest_path* on success, ``None`` if the download fails.
+    """
+    try:
+        pic = requests.get(avatar_url, stream=True, timeout=30)
+        pic.raise_for_status()
+        pic.raw.decode_content = True
+        with dest_path.open("wb") as fh:
+            shutil.copyfileobj(pic.raw, fh)
+        return dest_path
+    except requests.RequestException as exc:
+        log.warning(f"Could not download avatar: {exc}")
+        return None
+
+
+def _download_wiki(gh_repo_data: dict, dest_dir: Path) -> Path | None:
+    """Clone the repository wiki into *dest_dir*/wiki, if one exists.
+
+    GitHub sets ``has_wiki: true`` even for repos whose wiki has never been
+    edited, so a failed clone is silently ignored rather than treated as an
+    error.
+
+    Args:
+        gh_repo_data: GitHub API metadata dict for the repository.
+        dest_dir: Parent directory in which the ``wiki/`` clone will be placed.
+
+    Returns:
+        Path to the cloned wiki folder, or ``None`` if unavailable.
     """
     if not gh_repo_data.get("has_wiki"):
         return None
@@ -144,6 +188,7 @@ def _download_wiki(gh_repo_data: dict, dest_dir: Path) -> Path | None:
         log.info("Wiki cloned successfully.")
         return wiki_folder
     except git.GitCommandError:
+        # Wiki flag is true but the wiki may be empty or disabled.
         log.info("Wiki not available or empty — skipping.")
         return None
 
@@ -153,15 +198,16 @@ def _download_wiki(gh_repo_data: dict, dest_dir: Path) -> Path | None:
 # ---------------------------------------------------------------------------
 
 def get_description_from_readme(repo_folder: Path) -> str:
-    """Return an HTML string from the repo's README, or empty string if absent.
+    """Return an HTML string built from the repository README, or ``""`` if absent.
 
-    Checks for README.md (case-insensitive variants) then readme.txt.
+    Checks for ``README.md`` (and common case variants) then falls back to
+    ``readme.txt``. The Markdown is converted to HTML via markdown2.
 
     Args:
-        repo_folder: Path to the local repository.
+        repo_folder: Path to the locally cloned repository.
 
     Returns:
-        HTML string.
+        HTML string with newlines stripped, or empty string.
     """
     for name in ("README.md", "readme.md", "Readme.md"):
         readme = repo_folder / name
@@ -180,17 +226,20 @@ def get_description_from_readme(repo_folder: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def create_bundle(repo_folder: Path, bundle_name: str) -> Path:
-    """Create a git bundle of all refs in the repository.
+    """Create a ``git bundle`` containing all refs of *repo_folder*.
+
+    The bundle file is written inside *repo_folder* itself so it is
+    automatically included in any cleanup of that directory.
 
     Args:
         repo_folder: Path to the local git repository.
-        bundle_name: Stem name for the bundle file (no extension).
+        bundle_name: Stem name for the bundle file (no ``.bundle`` extension).
 
     Returns:
-        Path to the created .bundle file.
+        Path to the created ``.bundle`` file.
 
     Raises:
-        BundleError: If the repository folder is missing or git fails.
+        BundleError: If *repo_folder* does not exist or ``git bundle`` fails.
     """
     if not repo_folder.exists():
         raise BundleError(f"Repository directory does not exist: {repo_folder}")
@@ -220,19 +269,36 @@ def upload_ia(
 ) -> tuple[str, dict, str]:
     """Upload the repository (and optional wiki) bundle to the Internet Archive.
 
+    Workflow
+    --------
+    1. Compute the IA item identifier from the repo name and last-push date.
+    2. **Early-exit**: check whether the item already exists on IA *before*
+       doing any heavy work — avoids redundant clones and uploads.
+    3. Download the owner avatar and clone the wiki **concurrently** (both
+       are pure network I/O with no dependency on each other).
+    4. Build the HTML description (now that wiki status is known).
+    5. Create git bundles for the repo and, if available, the wiki.
+    6. Upload all files to the IA item sequentially.
+
+    Note: callers must clean up ``gh_repo_folder.parent`` (the mkdtemp root)
+    after this function returns, as ``_download_wiki`` may have created a
+    ``wiki/`` subdirectory alongside the main clone.
+
     Args:
         gh_repo_folder: Path to the locally cloned repository.
         gh_repo_data: Metadata dict from the GitHub API.
         s3_access: Internet Archive S3 access key.
         s3_secret: Internet Archive S3 secret key.
-        custom_meta: Optional extra metadata fields to merge into the IA item.
+        custom_meta: Optional extra metadata fields merged into the IA item
+            (overrides defaults on key collision).
 
     Returns:
         Tuple of (ia_item_identifier, metadata_dict, bundle_filename_stem).
 
     Raises:
-        UploadError: If bundle creation or upload fails.
+        UploadError: If bundle creation or any IA upload fails.
     """
+    # --- Derive names and timestamps from the GitHub push date ---
     pushed = datetime.strptime(gh_repo_data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
     pushed_date = pushed.strftime("%Y-%m-%d_%H-%M-%S")
     raw_pushed_date = pushed.strftime("%Y-%m-%d %H:%M:%S")
@@ -241,28 +307,52 @@ def upload_ia(
 
     repo_name = gh_repo_data["full_name"].replace("/", "-")
     original_url = gh_repo_data["html_url"]
+    # bundle_stem is used both as the IA item identifier suffix and as the
+    # filename stem for the .bundle file.
     bundle_stem = f"{repo_name}_-_{pushed_date}"
+    itemname = f"github.com-{repo_name}_-_{pushed_date}"
 
     owner_url = gh_repo_data["owner"]["html_url"]
     owner_name = gh_repo_data["owner"]["login"]
 
-    # Download avatar as cover image
-    cover_path = gh_repo_folder / "cover.jpg"
-    avatar_url = gh_repo_data["owner"]["avatar_url"]
-    try:
-        pic = requests.get(avatar_url, stream=True, timeout=30)
-        pic.raise_for_status()
-        pic.raw.decode_content = True
-        with cover_path.open("wb") as fh:
-            shutil.copyfileobj(pic.raw, fh)
-    except requests.RequestException as exc:
-        log.warning(f"Could not download avatar: {exc}")
-        cover_path = None  # type: ignore[assignment]
-
-    # Build restore instructions
+    # --- Early-exit: avoid redundant work if IA already has this snapshot ---
+    # The identifier encodes pushed_at, so a new push creates a new item and
+    # is always re-archived; only the exact same snapshot is skipped.
     ia_bundle_url = (
-        f"https://archive.org/download/github.com-{bundle_stem}/{bundle_stem}.bundle"
+        f"https://archive.org/download/{itemname}/{bundle_stem}.bundle"
     )
+    try:
+        session = internetarchive.get_session(
+            config={"s3": {"access": s3_access, "secret": s3_secret}}
+        )
+        item = session.get_item(itemname)
+    except Exception as exc:
+        raise UploadError(f"Failed to connect to Internet Archive: {exc}") from exc
+
+    if item.exists:
+        log.warning("This repository snapshot is already archived.")
+        log.info(f"Archived URL: https://archive.org/details/{itemname}")
+        log.info(f"Bundle URL:   {ia_bundle_url}")
+        return itemname, {"title": itemname}, bundle_stem
+
+    # --- Concurrently download avatar + clone wiki (both are network I/O) ---
+    cover_path: Path | None = None
+    wiki_folder: Path | None = None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        avatar_future = pool.submit(
+            _download_avatar,
+            gh_repo_data["owner"]["avatar_url"],
+            gh_repo_folder / "cover.jpg",
+        )
+        wiki_future = pool.submit(
+            _download_wiki,
+            gh_repo_data,
+            gh_repo_folder.parent,  # wiki/ lands next to the main clone
+        )
+        cover_path = avatar_future.result()
+        wiki_folder = wiki_future.result()
+
+    # --- Build HTML restore instructions ---
     restore_snippet = (
         f'<pre><code>wget {ia_bundle_url}</code></pre>'
         f"and run: <pre><code>git clone {bundle_stem}.bundle</code></pre>"
@@ -277,15 +367,14 @@ def upload_ia(
         f"Upload date: {date}"
     )
 
-    # Wiki (implements TODO items)
+    # --- Optionally bundle the wiki and append a link to the description ---
     wiki_bundle_path: Path | None = None
-    wiki_folder = _download_wiki(gh_repo_data, gh_repo_folder.parent)
     if wiki_folder:
         wiki_stem = f"{bundle_stem}_wiki"
         try:
             wiki_bundle_path = create_bundle(wiki_folder, wiki_stem)
             wiki_url = (
-                f"https://archive.org/download/github.com-{bundle_stem}/{wiki_stem}.bundle"
+                f"https://archive.org/download/{itemname}/{wiki_stem}.bundle"
             )
             description += (
                 f'<br/><br/>Wiki bundle: <a href="{wiki_url}">{wiki_stem}.bundle</a>'
@@ -294,9 +383,8 @@ def upload_ia(
         except BundleError as exc:
             log.warning(f"Could not create wiki bundle: {exc}")
 
+    # --- Assemble full IA metadata ---
     uploader_tag = f"{__main_name__}-{__version__}"
-    itemname = f"github.com-{repo_name}_-_{pushed_date}"
-
     meta: dict = dict(
         mediatype="software",
         creator=owner_name,
@@ -310,30 +398,17 @@ def upload_ia(
         pushed_date=raw_pushed_date,
         description=description,
     )
-
     if custom_meta:
         meta.update(custom_meta)
 
-    # Create main bundle
+    # --- Create the main git bundle ---
     try:
         bundle_file = create_bundle(gh_repo_folder, bundle_stem)
     except BundleError as exc:
         raise UploadError(f"Bundle creation failed: {exc}") from exc
 
-    # Upload to Internet Archive
+    # --- Upload all files to the IA item sequentially ---
     try:
-        log.info(f"Creating Internet Archive item: {itemname}")
-        session = internetarchive.get_session(
-            config={"s3": {"access": s3_access, "secret": s3_secret}}
-        )
-        item = session.get_item(itemname)
-
-        if item.exists:
-            log.warning("This repository appears to already be archived.")
-            log.info(f"Archived URL:    https://archive.org/details/{itemname}")
-            log.info(f"Bundle URL:      {ia_bundle_url}")
-            return itemname, meta, bundle_stem
-
         log.info(f"Uploading bundle: {bundle_file.name}")
         item.upload(
             str(bundle_file),
@@ -374,13 +449,14 @@ def upload_ia(
 def get_ia_credentials() -> tuple[str, str]:
     """Read Internet Archive S3 credentials from the local config file.
 
-    If no config file is found, prompts the user to run ``ia configure``.
+    Checks ``~/.ia`` then ``~/.config/ia.ini``. If neither exists the user
+    is prompted to run ``ia configure`` interactively.
 
     Returns:
         Tuple of (s3_access_key, s3_secret_key).
 
     Raises:
-        CredentialsError: If credentials cannot be obtained.
+        CredentialsError: If credentials cannot be found or the config is malformed.
     """
     candidates = [
         Path("~/.ia").expanduser(),
@@ -400,6 +476,7 @@ def get_ia_credentials() -> tuple[str, str]:
             raise CredentialsError(
                 "Could not find the 'ia' command — is internetarchive installed?"
             ) from exc
+        # Re-check after interactive configuration
         config_file = next((p for p in candidates if p.exists()), None)
         if config_file is None:
             raise CredentialsError("Config file still missing after running 'ia configure'.")

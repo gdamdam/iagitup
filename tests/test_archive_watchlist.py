@@ -206,7 +206,9 @@ class TestArchiveRepo:
         assert state == {}
 
     def test_successful_archive_updates_state(self, tmp_path):
-        fake_folder = tmp_path / "repo"
+        download_dir = tmp_path / "tmpXXX"
+        download_dir.mkdir()
+        fake_folder = download_dir / "repo"
         fake_folder.mkdir()
         state = {}
 
@@ -222,7 +224,9 @@ class TestArchiveRepo:
         assert "archived_at" in state["owner/repo"]
 
     def test_returns_failed_on_iagitup_error(self, tmp_path):
-        fake_folder = tmp_path / "repo"
+        download_dir = tmp_path / "tmpXXX"
+        download_dir.mkdir()
+        fake_folder = download_dir / "repo"
         fake_folder.mkdir()
         state = {}
 
@@ -234,7 +238,10 @@ class TestArchiveRepo:
         assert "owner/repo" not in state  # state must not be updated on failure
 
     def test_cleanup_on_failure(self, tmp_path):
-        fake_folder = tmp_path / "repo"
+        # Simulate the mkdtemp structure: download_dir / repo_name
+        download_dir = tmp_path / "tmpXXX"
+        download_dir.mkdir()
+        fake_folder = download_dir / "repo"
         fake_folder.mkdir()
         (fake_folder / "bundle.bundle").write_text("data")
 
@@ -242,20 +249,27 @@ class TestArchiveRepo:
              patch("archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
             archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False)
 
-        assert not fake_folder.exists()
+        # The entire mkdtemp root (download_dir) should be removed, not just
+        # the repo subfolder, so the wiki/ sibling is also cleaned up.
+        assert not download_dir.exists()
 
     def test_cleanup_on_success(self, tmp_path):
-        fake_folder = tmp_path / "repo"
+        # Simulate the mkdtemp structure: download_dir / repo_name
+        download_dir = tmp_path / "tmpXXX"
+        download_dir.mkdir()
+        fake_folder = download_dir / "repo"
         fake_folder.mkdir()
 
         with patch("archive_watchlist.repo_download", return_value=({}, fake_folder)), \
              patch("archive_watchlist.upload_ia", return_value=("ia-id", {}, "bundle")):
             archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False)
 
-        assert not fake_folder.exists()
+        assert not download_dir.exists()
 
     def test_upload_ia_receives_custom_meta(self, tmp_path):
-        fake_folder = tmp_path / "repo"
+        download_dir = tmp_path / "tmpXXX"
+        download_dir.mkdir()
+        fake_folder = download_dir / "repo"
         fake_folder.mkdir()
 
         with patch("archive_watchlist.repo_download", return_value=({}, fake_folder)), \
