@@ -1,0 +1,22 @@
+stages:
+  - lint
+  - test
+
+syntax:
+  stage: lint
+  image: python:3.12-slim
+  script:
+    - python -m py_compile iagitup/iagitup.py
+    - python -m py_compile iagitup/__main__.py
+    - python -m py_compile iagitup/archive_watchlist.py
+
+test:
+  stage: test
+  image: python:${PYTHON_VERSION}-slim
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13"]
+  script:
+    - pip install --quiet -e ".[test]" 2>/dev/null || pip install --quiet -e .
+    - pip install --quiet pytest
+    - python -m pytest tests/ -v
