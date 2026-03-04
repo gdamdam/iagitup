@@ -16,6 +16,8 @@ test:
   parallel:
     matrix:
       - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13"]
+  before_script:
+    - apt-get update -qq && apt-get install -yqq git > /dev/null
   script:
     - pip install --quiet -e ".[test]" 2>/dev/null || pip install --quiet -e .
     - pip install --quiet pytest
