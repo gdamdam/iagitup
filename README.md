@@ -45,6 +45,8 @@
 pip install iagitup
 ```
 
+This installs two commands: `iagitup` and `archive-watchlist`.
+
 ### From source
 
 ```bash
@@ -185,7 +187,7 @@ github.com-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}
 
 ## archive_watchlist — bulk archiving
 
-`archive_watchlist.py` runs as a single-shot script (scheduled via cron or similar) to continuously archive the **top-N most-starred GitHub repositories**.
+`archive-watchlist` (installed as a console command by `pip install iagitup`) runs as a single-shot script (scheduled via cron or similar) to continuously archive the **top-N most-starred GitHub repositories**.
 
 ### How it works
 
@@ -199,7 +201,7 @@ github.com-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}
 ### Options
 
 ```bash
-python archive_watchlist.py [options]
+archive-watchlist [options]
 ```
 
 | Flag | Default | Description |
@@ -213,13 +215,13 @@ Examples:
 
 ```bash
 # Preview the top 10 without uploading
-python archive_watchlist.py --dry-run --top-n 10
+archive-watchlist --dry-run --top-n 10
 
 # Full run with more parallelism
-python archive_watchlist.py --workers 8
+archive-watchlist --workers 8
 
 # Use a custom state file
-python archive_watchlist.py --state-file /var/lib/iagitup/state.json
+archive-watchlist --state-file /var/lib/iagitup/state.json
 ```
 
 ### Duplicate prevention
@@ -252,14 +254,14 @@ In addition to the standard iagitup fields, `archive_watchlist` injects:
 Add to your crontab (`crontab -e`) to run daily at 03:00:
 
 ```cron
-0 3 * * * cd /path/to/iagitup && python archive_watchlist.py >> watchlist.log 2>&1
+0 3 * * * archive-watchlist >> watchlist.log 2>&1
 ```
 
 Set `GITHUB_TOKEN` in the cron environment to avoid rate limiting:
 
 ```cron
 GITHUB_TOKEN=ghp_your_token_here
-0 3 * * * cd /path/to/iagitup && python archive_watchlist.py >> watchlist.log 2>&1
+0 3 * * * archive-watchlist >> watchlist.log 2>&1
 ```
 
 ### State file

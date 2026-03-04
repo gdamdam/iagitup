@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from archive_watchlist import (
+from iagitup.archive_watchlist import (
     archive_repo,
     build_custom_meta,
     fetch_top_repos,
@@ -136,40 +136,40 @@ class TestBuildCustomMeta:
 
 class TestFetchTopRepos:
     def test_returns_items(self):
-        with patch("archive_watchlist.requests.get",
+        with patch("iagitup.archive_watchlist.requests.get",
                    return_value=_mock_response([SAMPLE_REPO])):
             result = fetch_top_repos(1)
         assert result == [SAMPLE_REPO]
 
     def test_respects_top_n_in_per_page_param(self):
-        with patch("archive_watchlist.requests.get",
+        with patch("iagitup.archive_watchlist.requests.get",
                    return_value=_mock_response()) as mock_get:
             fetch_top_repos(10)
         _, kwargs = mock_get.call_args
         assert kwargs["params"]["per_page"] == 10
 
     def test_caps_per_page_at_100(self):
-        with patch("archive_watchlist.requests.get",
+        with patch("iagitup.archive_watchlist.requests.get",
                    return_value=_mock_response()) as mock_get:
             fetch_top_repos(100)
         _, kwargs = mock_get.call_args
         assert kwargs["params"]["per_page"] == 100
 
     def test_exits_on_api_error(self):
-        with patch("archive_watchlist.requests.get",
+        with patch("iagitup.archive_watchlist.requests.get",
                    return_value=_mock_response(status=403)):
             with pytest.raises(SystemExit):
                 fetch_top_repos(10)
 
     def test_warns_on_low_rate_limit(self, caplog):
-        with patch("archive_watchlist.requests.get",
+        with patch("iagitup.archive_watchlist.requests.get",
                    return_value=_mock_response(remaining=3)):
             with caplog.at_level(logging.WARNING, logger="archive_watchlist"):
                 fetch_top_repos(1)
         assert any("rate limit" in r.message.lower() for r in caplog.records)
 
     def test_no_warning_on_healthy_rate_limit(self, caplog):
-        with patch("archive_watchlist.requests.get",
+        with patch("iagitup.archive_watchlist.requests.get",
                    return_value=_mock_response(remaining=100)):
             with caplog.at_level(logging.WARNING, logger="archive_watchlist"):
                 fetch_top_repos(1)
@@ -212,8 +212,8 @@ class TestArchiveRepo:
         fake_folder.mkdir()
         state = {}
 
-        with patch("archive_watchlist.repo_download", return_value=({}, fake_folder)), \
-             patch("archive_watchlist.upload_ia", return_value=("ia-id-123", {}, "bundle")):
+        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", return_value=("ia-id-123", {}, "bundle")):
             result = archive_repo(SAMPLE_REPO, 1, "acc", "sec", state, dry_run=False)
 
         assert result == "archived"
@@ -230,8 +230,8 @@ class TestArchiveRepo:
         fake_folder.mkdir()
         state = {}
 
-        with patch("archive_watchlist.repo_download", return_value=({}, fake_folder)), \
-             patch("archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
+        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
             result = archive_repo(SAMPLE_REPO, 1, "acc", "sec", state, dry_run=False)
 
         assert result == "failed"
@@ -245,8 +245,8 @@ class TestArchiveRepo:
         fake_folder.mkdir()
         (fake_folder / "bundle.bundle").write_text("data")
 
-        with patch("archive_watchlist.repo_download", return_value=({}, fake_folder)), \
-             patch("archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
+        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
             archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False)
 
         # The entire mkdtemp root (download_dir) should be removed, not just
@@ -260,8 +260,8 @@ class TestArchiveRepo:
         fake_folder = download_dir / "repo"
         fake_folder.mkdir()
 
-        with patch("archive_watchlist.repo_download", return_value=({}, fake_folder)), \
-             patch("archive_watchlist.upload_ia", return_value=("ia-id", {}, "bundle")):
+        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", return_value=("ia-id", {}, "bundle")):
             archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False)
 
         assert not download_dir.exists()
@@ -272,8 +272,8 @@ class TestArchiveRepo:
         fake_folder = download_dir / "repo"
         fake_folder.mkdir()
 
-        with patch("archive_watchlist.repo_download", return_value=({}, fake_folder)), \
-             patch("archive_watchlist.upload_ia", return_value=("ia-id", {}, "b")) as mock_upload:
+        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", return_value=("ia-id", {}, "b")) as mock_upload:
             archive_repo(SAMPLE_REPO, 3, "acc", "sec", {}, dry_run=False)
 
         _, kwargs = mock_upload.call_args
