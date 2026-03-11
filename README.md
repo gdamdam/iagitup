@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/iagitup)](https://pypi.org/project/iagitup/)
 [![Python versions](https://img.shields.io/pypi/pyversions/iagitup)](https://pypi.org/project/iagitup/)
 [![License: GPLv3](https://img.shields.io/pypi/l/iagitup)](https://www.gnu.org/licenses/gpl-3.0)
-[![Downloads](https://img.shields.io/pypi/dm/iagitup)](https://pypi.org/project/iagitup/)
+
 
 **Archive GitHub repositories to the [Internet Archive](https://archive.org).**
 
