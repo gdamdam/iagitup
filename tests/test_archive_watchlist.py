@@ -341,6 +341,20 @@ class TestWatchlistCli:
             with patch("sys.argv", ["archive-watchlist", "--until", "01/30/2025"]):
                 main()
 
+    def test_max_size_filters_large_repos(self):
+        from iagitup.archive_watchlist import main
+        small_repo = {**SAMPLE_REPO, "full_name": "owner/small", "size": 100_000}
+        large_repo = {**SAMPLE_REPO, "full_name": "owner/large", "size": 600_000}
+        with patch("sys.argv", ["archive-watchlist", "--dry-run", "--top-n", "2", "--max-size", "500"]), \
+             patch("iagitup.archive_watchlist.fetch_top_repos", return_value=[small_repo, large_repo]), \
+             patch("iagitup.archive_watchlist.load_state", return_value={}), \
+             patch("iagitup.archive_watchlist.save_state"), \
+             patch("iagitup.archive_watchlist.archive_repo", return_value="archived") as mock_archive:
+            main()
+        # Only the small repo should be passed to archive_repo
+        assert mock_archive.call_count == 1
+        assert mock_archive.call_args[0][0]["full_name"] == "owner/small"
+
     def test_dry_run_skips_credentials(self):
         from iagitup.archive_watchlist import main
         with patch("sys.argv", ["archive-watchlist", "--dry-run", "--top-n", "1"]), \

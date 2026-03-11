@@ -1,7 +1,7 @@
 <h1 align="center">iagitup</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.5.0-blue?style=flat" alt="Version 3.5.0">
+  <img src="https://img.shields.io/badge/version-3.6.0-blue?style=flat" alt="Version 3.6.0">
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>
   <a href="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml"><img src="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
@@ -23,7 +23,7 @@
 - **Wiki archiving** -- wiki repositories are detected and bundled automatically (GitHub only).
 - **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item. GitHub repos get full API metadata; other platforms extract metadata from git history.
 - **Duplicate prevention** -- two layers (local state cache + IA item check) ensure the same snapshot is never uploaded twice.
-- **Bulk archiving** -- `archive-watchlist` fetches and archives the top-N most-starred GitHub repos on a schedule, with `--days`, `--since`, and `--until` filters for trending repos.
+- **Bulk archiving** -- `archive-watchlist` fetches and archives the top-N most-starred GitHub repos on a schedule, with `--days`, `--since`, `--until`, and `--max-size` filters for trending repos.
 - **Parallel workers** -- configurable concurrency for bulk runs.
 - **Custom metadata** -- pass extra `key:value` pairs to enrich any upload.
 
@@ -107,6 +107,9 @@ archive-watchlist --since 2025-01-01 --until 2025-06-30
 # Archive repos created since a specific date
 archive-watchlist --since 2025-06-01
 
+# Skip repos larger than 500 MB
+archive-watchlist --max-size 500
+
 # Preview trending repos from the last month
 archive-watchlist --days 30 --dry-run --top-n 20
 ```
@@ -139,6 +142,7 @@ archive-watchlist [options]
 | `--days N` | *(all-time)* | Only consider repos created within the last N days |
 | `--since DATE` | -- | Only consider repos created on or after DATE (YYYY-MM-DD) |
 | `--until DATE` | -- | Only consider repos created on or before DATE (YYYY-MM-DD) |
+| `--max-size MB` | *(no limit)* | Skip repos larger than this size in MB (based on GitHub's reported size) |
 | `--workers N` | `4` | Number of parallel archive workers |
 | `--dry-run` | off | Preview what would be archived -- no uploads, no state changes |
 | `--state-file PATH` | `./watchlist_state.json` | Path to the persistent state cache |

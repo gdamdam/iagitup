@@ -19,6 +19,7 @@ Usage:
     python archive_watchlist.py --since 2025-01-01 --until 2025-06-30  # date range
     python archive_watchlist.py --since 2025-01-01                  # since a date
     python archive_watchlist.py --until 2025-12-31                  # up to a date
+    python archive_watchlist.py --max-size 500                       # skip repos > 500 MB
     python archive_watchlist.py --workers 8                         # more parallelism
     python archive_watchlist.py --dry-run        # preview without uploading
     python archive_watchlist.py --state-file /path/to/state.json
@@ -328,6 +329,10 @@ def main() -> None:
         help="Only consider repos created on or before this date (YYYY-MM-DD).",
     )
     parser.add_argument(
+        "--max-size", type=int, default=None,
+        help="Skip repos larger than this size in MB (based on GitHub's reported size).",
+    )
+    parser.add_argument(
         "--workers", type=int, default=4,
         help="Number of parallel archive workers (default: 4).",
     )
@@ -383,6 +388,14 @@ def main() -> None:
 
     state = load_state(args.state_file)
     repos = fetch_top_repos(args.top_n, days=args.days, since=args.since, until=args.until)
+
+    if args.max_size is not None:
+        max_kb = args.max_size * 1024
+        before = len(repos)
+        repos = [r for r in repos if (r.get("size") or 0) <= max_kb]
+        skipped = before - len(repos)
+        if skipped:
+            log.info(f"Filtered out {skipped} repo(s) exceeding {args.max_size} MB.")
 
     counts: dict[str, int] = {"archived": 0, "skipped": 0, "failed": 0}
     # save_lock guards concurrent writes to the state file on disk.
