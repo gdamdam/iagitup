@@ -17,7 +17,7 @@ __author__ = "Giovanni Damiola"
 __copyright__ = "Copyright 2018-2026, Giovanni Damiola"
 __main_name__ = "iagitup"
 __license__ = "GPLv3"
-__version__ = "v3.1.2"
+__version__ = "3.1.2"
 
 import configparser
 import logging
