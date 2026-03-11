@@ -35,6 +35,7 @@ import requests
 
 from iagitup.iagitup import (
     IagitupError,
+    __version__,
     _github_headers,
     get_ia_credentials,
     repo_download,
@@ -295,6 +296,9 @@ def main() -> None:
     parser.add_argument(
         "--state-file", type=Path, default=DEFAULT_STATE_FILE,
         help=f"Path to the state cache file (default: {DEFAULT_STATE_FILE}).",
+    )
+    parser.add_argument(
+        "--version", "-v", action="version", version=__version__,
     )
     args = parser.parse_args()
 

@@ -108,6 +108,7 @@ archive-watchlist [options]
 | `--workers N` | `4` | Number of parallel archive workers |
 | `--dry-run` | off | Preview what would be archived -- no uploads, no state changes |
 | `--state-file PATH` | `./watchlist_state.json` | Path to the persistent state cache |
+| `--version` / `-v` | -- | Print version and exit |
 
 Examples:
 
