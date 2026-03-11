@@ -17,7 +17,7 @@ __author__ = "Giovanni Damiola"
 __copyright__ = "Copyright 2018-2026, Giovanni Damiola"
 __main_name__ = "iagitup"
 __license__ = "GPLv3"
-__version__ = "3.1.2"
+__version__ = "3.2.0"
 
 import configparser
 import logging
@@ -60,6 +60,10 @@ class UploadError(IagitupError):
 
 class CredentialsError(IagitupError):
     """Raised when Internet Archive credentials are missing or invalid."""
+
+
+class LfsError(IagitupError):
+    """Raised when a Git LFS operation fails."""
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +287,66 @@ def create_bundle(repo_folder: Path, bundle_name: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Git LFS helpers
+# ---------------------------------------------------------------------------
+
+def _is_lfs_installed() -> bool:
+    """Return True if the ``git-lfs`` binary is on ``$PATH``."""
+    return shutil.which("git-lfs") is not None
+
+
+def _detect_lfs(repo_folder: Path) -> bool:
+    """Return True if the repo uses Git LFS (has ``filter=lfs`` in ``.gitattributes``)."""
+    gitattributes = repo_folder / ".gitattributes"
+    if not gitattributes.exists():
+        return False
+    try:
+        content = gitattributes.read_text(encoding="utf-8", errors="replace")
+        return "filter=lfs" in content
+    except OSError:
+        return False
+
+
+def _fetch_and_archive_lfs(repo_folder: Path, archive_name: str) -> Path | None:
+    """Fetch all LFS objects and create a tar.gz archive of ``.git/lfs/``.
+
+    Returns the archive path on success, or ``None`` (with a warning) if
+    git-lfs is not installed, the fetch fails, or the LFS directory is empty.
+    """
+    if not _is_lfs_installed():
+        log.warning(
+            "git-lfs is not installed — LFS objects will NOT be included in the archive. "
+            "Install git-lfs to preserve large file content."
+        )
+        return None
+
+    try:
+        subprocess.check_call(
+            ["git", "lfs", "fetch", "--all"],
+            cwd=repo_folder,
+        )
+    except subprocess.CalledProcessError as exc:
+        log.warning(f"git lfs fetch failed — LFS objects will be missing: {exc}")
+        return None
+
+    lfs_dir = repo_folder / ".git" / "lfs"
+    if not lfs_dir.exists() or not any(lfs_dir.iterdir()):
+        log.warning("LFS directory is empty after fetch — skipping LFS archive.")
+        return None
+
+    archive_path = repo_folder / f"{archive_name}_lfs.tar.gz"
+    try:
+        subprocess.check_call(
+            ["tar", "-czf", str(archive_path), "-C", str(repo_folder / ".git"), "lfs"],
+        )
+    except subprocess.CalledProcessError as exc:
+        log.warning(f"Failed to create LFS archive: {exc}")
+        return None
+
+    return archive_path
+
+
+# ---------------------------------------------------------------------------
 # Upload
 # ---------------------------------------------------------------------------
 
@@ -383,11 +447,29 @@ def upload_ia(
         cover_path = avatar_future.result()
         wiki_folder = wiki_future.result()
 
+    # --- Detect and fetch LFS objects ---
+    has_lfs = _detect_lfs(gh_repo_folder)
+    lfs_archive_path: Path | None = None
+    if has_lfs:
+        log.info("Git LFS detected — fetching LFS objects ...")
+        lfs_archive_path = _fetch_and_archive_lfs(gh_repo_folder, bundle_stem)
+
     # --- Build HTML restore instructions ---
     restore_snippet = (
         f'<pre><code>wget {ia_bundle_url}</code></pre>'
         f"and run: <pre><code>git clone {bundle_stem}.bundle</code></pre>"
     )
+    if lfs_archive_path:
+        lfs_url = f"https://archive.org/download/{itemname}/{bundle_stem}_lfs.tar.gz"
+        restore_snippet += (
+            f"<br/><br/>This repository uses Git LFS. To restore LFS objects:"
+            f"<pre><code>cd {gh_repo_data['full_name'].split('/')[-1]}\n"
+            f"wget {lfs_url}\n"
+            f"mkdir -p .git/lfs\n"
+            f"tar -xzf {bundle_stem}_lfs.tar.gz -C .git/\n"
+            f"git lfs install\n"
+            f"git lfs checkout</code></pre>"
+        )
 
     description = (
         f"<br/>{gh_repo_data.get('description', '')}<br/><br/>"
@@ -429,6 +511,8 @@ def upload_ia(
         pushed_date=raw_pushed_date,
         description=description,
     )
+    if has_lfs:
+        meta["has_lfs"] = "true"
     if custom_meta:
         meta.update(custom_meta)
 
@@ -467,6 +551,15 @@ def upload_ia(
             log.info("Uploading wiki bundle ...")
             item.upload(
                 str(wiki_bundle_path),
+                retries=9001,
+                request_kwargs={"timeout": 9001},
+                delete=True,
+            )
+
+        if lfs_archive_path and lfs_archive_path.exists():
+            log.info("Uploading LFS archive ...")
+            item.upload(
+                str(lfs_archive_path),
                 retries=9001,
                 request_kwargs={"timeout": 9001},
                 delete=True,

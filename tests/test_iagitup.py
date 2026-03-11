@@ -11,12 +11,16 @@ import pytest
 from iagitup.iagitup import (
     BundleError,
     CredentialsError,
+    LfsError,
     RepoDownloadError,
     UploadError,
     __version__,
+    _detect_lfs,
     _download_avatar,
     _download_wiki,
+    _fetch_and_archive_lfs,
     _github_headers,
+    _is_lfs_installed,
     _parse_github_url,
     create_bundle,
     get_description_from_readme,
@@ -544,6 +548,150 @@ class TestGetIaCredentialsPrompt:
             with patch("iagitup.iagitup.subprocess.call", side_effect=FileNotFoundError):
                 with pytest.raises(CredentialsError, match="Could not find"):
                     get_ia_credentials()
+
+
+# ---------------------------------------------------------------------------
+# LFS detection and archiving
+# ---------------------------------------------------------------------------
+
+class TestLfsDetection:
+    def test_detects_lfs_in_gitattributes(self, tmp_path: Path):
+        (tmp_path / ".gitattributes").write_text(
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n"
+        )
+        assert _detect_lfs(tmp_path) is True
+
+    def test_no_lfs_in_gitattributes(self, tmp_path: Path):
+        (tmp_path / ".gitattributes").write_text("*.txt text\n")
+        assert _detect_lfs(tmp_path) is False
+
+    def test_no_gitattributes_file(self, tmp_path: Path):
+        assert _detect_lfs(tmp_path) is False
+
+
+class TestLfsInstalled:
+    def test_returns_true_when_installed(self):
+        with patch("iagitup.iagitup.shutil.which", return_value="/usr/bin/git-lfs"):
+            assert _is_lfs_installed() is True
+
+    def test_returns_false_when_not_installed(self):
+        with patch("iagitup.iagitup.shutil.which", return_value=None):
+            assert _is_lfs_installed() is False
+
+
+class TestFetchAndArchiveLfs:
+    def test_returns_none_when_lfs_not_installed(self, tmp_path: Path):
+        with patch("iagitup.iagitup._is_lfs_installed", return_value=False):
+            result = _fetch_and_archive_lfs(tmp_path, "test_bundle")
+        assert result is None
+
+    def test_returns_none_when_fetch_fails(self, tmp_path: Path):
+        with patch("iagitup.iagitup._is_lfs_installed", return_value=True), \
+             patch("iagitup.iagitup.subprocess.check_call",
+                   side_effect=subprocess.CalledProcessError(1, "git lfs fetch")):
+            result = _fetch_and_archive_lfs(tmp_path, "test_bundle")
+        assert result is None
+
+    def test_returns_none_when_lfs_dir_empty(self, tmp_path: Path):
+        lfs_dir = tmp_path / ".git" / "lfs"
+        lfs_dir.mkdir(parents=True)
+        # lfs_dir exists but is empty
+        with patch("iagitup.iagitup._is_lfs_installed", return_value=True), \
+             patch("iagitup.iagitup.subprocess.check_call"):
+            result = _fetch_and_archive_lfs(tmp_path, "test_bundle")
+        assert result is None
+
+    def test_success_creates_archive(self, tmp_path: Path):
+        lfs_dir = tmp_path / ".git" / "lfs" / "objects"
+        lfs_dir.mkdir(parents=True)
+        (lfs_dir / "abc123").write_text("fake lfs object")
+
+        with patch("iagitup.iagitup._is_lfs_installed", return_value=True), \
+             patch("iagitup.iagitup.subprocess.check_call") as mock_call:
+            # First call is git lfs fetch, second is tar
+            result = _fetch_and_archive_lfs(tmp_path, "test_bundle")
+
+        assert mock_call.call_count == 2
+        # tar call creates the archive
+        tar_call = mock_call.call_args_list[1]
+        assert "tar" in tar_call[0][0][0]
+        assert result == tmp_path / "test_bundle_lfs.tar.gz"
+
+
+class TestUploadIaWithLfs:
+    GH_DATA = {
+        "full_name": "owner/repo",
+        "html_url": "https://github.com/owner/repo",
+        "pushed_at": "2026-01-15T10:30:00Z",
+        "description": "A test repo",
+        "owner": {
+            "login": "owner",
+            "html_url": "https://github.com/owner",
+            "avatar_url": "https://avatars.example.com/u/1",
+        },
+        "has_wiki": False,
+    }
+
+    def test_lfs_archive_uploaded(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        mock_item = MagicMock()
+        mock_item.exists = False
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        fake_bundle = repo_folder / "owner-repo_-_2026-01-15_10-30-00.bundle"
+        fake_bundle.write_text("bundle")
+        fake_lfs = repo_folder / "owner-repo_-_2026-01-15_10-30-00_lfs.tar.gz"
+        fake_lfs.write_text("lfs archive")
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session), \
+             patch("iagitup.iagitup._download_avatar", return_value=None), \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup._detect_lfs", return_value=True), \
+             patch("iagitup.iagitup._fetch_and_archive_lfs", return_value=fake_lfs), \
+             patch("iagitup.iagitup.create_bundle", return_value=fake_bundle), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value="readme"):
+            identifier, meta, stem = upload_ia(
+                repo_folder, self.GH_DATA, s3_access="a", s3_secret="s",
+            )
+
+        assert meta["has_lfs"] == "true"
+        # Bundle upload + LFS upload = 2 calls
+        assert mock_item.upload.call_count == 2
+        # Check LFS restore instructions in description
+        assert "Git LFS" in meta["description"]
+        assert "git lfs checkout" in meta["description"]
+
+    def test_lfs_warning_no_upload_when_lfs_missing(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        mock_item = MagicMock()
+        mock_item.exists = False
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        fake_bundle = repo_folder / "owner-repo_-_2026-01-15_10-30-00.bundle"
+        fake_bundle.write_text("bundle")
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session), \
+             patch("iagitup.iagitup._download_avatar", return_value=None), \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup._detect_lfs", return_value=True), \
+             patch("iagitup.iagitup._fetch_and_archive_lfs", return_value=None), \
+             patch("iagitup.iagitup.create_bundle", return_value=fake_bundle), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value="readme"):
+            identifier, meta, stem = upload_ia(
+                repo_folder, self.GH_DATA, s3_access="a", s3_secret="s",
+            )
+
+        # LFS detected but fetch returned None — no LFS upload, no LFS restore instructions
+        assert mock_item.upload.call_count == 1
+        assert "Git LFS" not in meta["description"]
 
 
 # ---------------------------------------------------------------------------

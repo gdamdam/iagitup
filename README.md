@@ -17,6 +17,7 @@
 ## Features
 
 - **Full-fidelity snapshots** -- every branch, tag, and ref is preserved in a single git bundle.
+- **Git LFS support** -- LFS-enabled repos are detected automatically; large file objects are fetched and archived alongside the bundle.
 - **Wiki archiving** -- wiki repositories are detected and bundled automatically.
 - **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item.
 - **Duplicate prevention** -- two layers (local state cache + IA item check) ensure the same snapshot is never uploaded twice.
@@ -48,6 +49,7 @@ pip install .
 
 - Python **3.10, 3.11, 3.12, or 3.13**
 - `git` on `$PATH`
+- `git-lfs` on `$PATH` *(optional — needed to archive LFS objects; repos are still archived without it, but LFS pointers won't resolve)*
 - An [Internet Archive account](https://archive.org/account/login.createaccount.php)
 
 ---
@@ -213,6 +215,7 @@ Each archived repository becomes a single IA item containing:
 | `<bundle_name>.bundle` | Full git bundle (all branches + tags) |
 | `cover.jpg` | Repository owner's avatar |
 | `<bundle_name>_wiki.bundle` | Wiki git bundle *(if wiki exists)* |
+| `<bundle_name>_lfs.tar.gz` | Git LFS objects *(if repo uses LFS)* |
 
 ### Bulk archiving (`archive-watchlist`)
 
@@ -284,6 +287,19 @@ git clone <bundle>.bundle my-repo
 ```
 
 All branches and tags are preserved in the bundle.
+
+### Restoring LFS objects
+
+If the archived item includes an `_lfs.tar.gz` file:
+
+```bash
+cd my-repo
+wget https://archive.org/download/<identifier>/<bundle>_lfs.tar.gz
+mkdir -p .git/lfs
+tar -xzf <bundle>_lfs.tar.gz -C .git/
+git lfs install
+git lfs checkout
+```
 
 ---
 

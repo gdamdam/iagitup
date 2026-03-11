@@ -38,6 +38,7 @@ from iagitup.iagitup import (
 PROGRAM_DESCRIPTION = (
     "Archive a GitHub repository to the Internet Archive. "
     "Downloads the repo, creates a git bundle, and uploads it to archive.org. "
+    "Git LFS objects are detected and archived automatically when git-lfs is installed. "
     "https://github.com/gdamdam/iagitup"
 )
 
