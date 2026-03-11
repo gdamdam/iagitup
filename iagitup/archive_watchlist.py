@@ -13,7 +13,7 @@ Repos are archived in parallel using a configurable worker pool (--workers).
 
 Usage:
     python archive_watchlist.py                  # archive top 100 (all-time), 4 workers
-    python archive_watchlist.py --top-n 10       # quick test
+    python archive_watchlist.py --top 10       # quick test
     python archive_watchlist.py --days 7                            # last week
     python archive_watchlist.py --days 30                           # last month
     python archive_watchlist.py --since 2025-01-01 --until 2025-06-30  # date range
@@ -315,7 +315,7 @@ def main() -> None:
         description="Archive the top-N most-starred GitHub repos to the Internet Archive."
     )
     parser.add_argument(
-        "--top-n", type=int, default=100,
+        "--top", type=int, default=100,
         help="Number of top repositories to check (default: 100, max: 100).",
     )
     parser.add_argument(
@@ -355,8 +355,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.top_n > 100:
-        parser.error("--top-n cannot exceed 100 (GitHub Search API limit per page).")
+    if args.top > 100:
+        parser.error("--top cannot exceed 100 (GitHub Search API limit per page).")
 
     if args.days is not None and (args.since or args.until):
         parser.error("--days cannot be combined with --since/--until.")
@@ -393,7 +393,7 @@ def main() -> None:
             sys.exit(1)
 
     state = load_state(args.state_file)
-    repos = fetch_top_repos(args.top_n, days=args.days, since=args.since, until=args.until)
+    repos = fetch_top_repos(args.top, days=args.days, since=args.since, until=args.until)
 
     if args.max_size is not None:
         max_kb = args.max_size * 1024

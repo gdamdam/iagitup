@@ -1,7 +1,7 @@
 <h1 align="center">iagitup</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.6.1-blue?style=flat" alt="Version 3.6.1">
+  <img src="https://img.shields.io/badge/version-3.6.2-blue?style=flat" alt="Version 3.6.2">
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>
   <a href="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml"><img src="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
@@ -93,7 +93,7 @@ iagitup https://git.example.com/org/project
 
 ```bash
 # Preview the top 10 without uploading
-archive-watchlist --dry-run --top-n 10
+archive-watchlist --dry-run --top 10
 
 # Full run with 8 parallel workers
 archive-watchlist --workers 8
@@ -111,7 +111,7 @@ archive-watchlist --since 2025-06-01
 archive-watchlist --max-size 500
 
 # Preview trending repos from the last month
-archive-watchlist --days 30 --dry-run --top-n 20
+archive-watchlist --days 30 --dry-run --top 20
 ```
 
 ---
@@ -139,7 +139,7 @@ archive-watchlist [options]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--top-n N` | `100` | Number of top repositories to fetch and check (max 100) |
+| `--top N` | `100` | Number of top repositories to fetch and check (max 100) |
 | `--days N` | *(all-time)* | Only consider repos created within the last N days |
 | `--since DATE` | -- | Only consider repos created on or after DATE (YYYY-MM-DD) |
 | `--until DATE` | -- | Only consider repos created on or before DATE (YYYY-MM-DD) |
@@ -163,7 +163,7 @@ archive-watchlist --days 7
 archive-watchlist --since 2025-01-01 --until 2025-12-31 --state-file /var/lib/iagitup/state.json
 
 # Combine with top-n for a quick daily trending sweep
-archive-watchlist --days 1 --top-n 20 --dry-run
+archive-watchlist --days 1 --top 20 --dry-run
 ```
 
 ---

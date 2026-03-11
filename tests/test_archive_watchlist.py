@@ -320,7 +320,7 @@ class TestWatchlistCli:
     def test_top_n_exceeds_100_exits(self):
         from iagitup.archive_watchlist import main
         with pytest.raises(SystemExit, match="2"):
-            with patch("sys.argv", ["archive-watchlist", "--top-n", "200"]):
+            with patch("sys.argv", ["archive-watchlist", "--top", "200"]):
                 main()
 
     def test_days_with_since_exits(self):
@@ -345,7 +345,7 @@ class TestWatchlistCli:
         from iagitup.archive_watchlist import main
         small_repo = {**SAMPLE_REPO, "full_name": "owner/small", "size": 100_000}
         large_repo = {**SAMPLE_REPO, "full_name": "owner/large", "size": 600_000}
-        with patch("sys.argv", ["archive-watchlist", "--dry-run", "--top-n", "2", "--max-size", "500"]), \
+        with patch("sys.argv", ["archive-watchlist", "--dry-run", "--top", "2", "--max-size", "500"]), \
              patch("iagitup.archive_watchlist.fetch_top_repos", return_value=[small_repo, large_repo]), \
              patch("iagitup.archive_watchlist.load_state", return_value={}), \
              patch("iagitup.archive_watchlist.save_state"), \
@@ -357,7 +357,7 @@ class TestWatchlistCli:
 
     def test_dry_run_skips_credentials(self):
         from iagitup.archive_watchlist import main
-        with patch("sys.argv", ["archive-watchlist", "--dry-run", "--top-n", "1"]), \
+        with patch("sys.argv", ["archive-watchlist", "--dry-run", "--top", "1"]), \
              patch("iagitup.archive_watchlist.fetch_top_repos", return_value=[SAMPLE_REPO]), \
              patch("iagitup.archive_watchlist.load_state", return_value={}), \
              patch("iagitup.archive_watchlist.save_state"), \
