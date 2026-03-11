@@ -175,6 +175,27 @@ class TestFetchTopRepos:
                 fetch_top_repos(1)
         assert not any("rate limit" in r.message.lower() for r in caplog.records)
 
+    def test_since_and_until_date_range(self):
+        with patch("iagitup.archive_watchlist.requests.get",
+                   return_value=_mock_response()) as mock_get:
+            fetch_top_repos(10, since="2025-01-01", until="2025-06-30")
+        _, kwargs = mock_get.call_args
+        assert "created:2025-01-01..2025-06-30" in kwargs["params"]["q"]
+
+    def test_since_only(self):
+        with patch("iagitup.archive_watchlist.requests.get",
+                   return_value=_mock_response()) as mock_get:
+            fetch_top_repos(10, since="2025-01-01")
+        _, kwargs = mock_get.call_args
+        assert "created:>=2025-01-01" in kwargs["params"]["q"]
+
+    def test_until_only(self):
+        with patch("iagitup.archive_watchlist.requests.get",
+                   return_value=_mock_response()) as mock_get:
+            fetch_top_repos(10, until="2025-06-30")
+        _, kwargs = mock_get.call_args
+        assert "created:<=2025-06-30" in kwargs["params"]["q"]
+
 
 # ---------------------------------------------------------------------------
 # archive_repo
@@ -300,6 +321,24 @@ class TestWatchlistCli:
         from iagitup.archive_watchlist import main
         with pytest.raises(SystemExit, match="2"):
             with patch("sys.argv", ["archive-watchlist", "--top-n", "200"]):
+                main()
+
+    def test_days_with_since_exits(self):
+        from iagitup.archive_watchlist import main
+        with pytest.raises(SystemExit, match="2"):
+            with patch("sys.argv", ["archive-watchlist", "--days", "7", "--since", "2025-01-01"]):
+                main()
+
+    def test_invalid_since_format_exits(self):
+        from iagitup.archive_watchlist import main
+        with pytest.raises(SystemExit, match="2"):
+            with patch("sys.argv", ["archive-watchlist", "--since", "not-a-date"]):
+                main()
+
+    def test_invalid_until_format_exits(self):
+        from iagitup.archive_watchlist import main
+        with pytest.raises(SystemExit, match="2"):
+            with patch("sys.argv", ["archive-watchlist", "--until", "01/30/2025"]):
                 main()
 
     def test_dry_run_skips_credentials(self):

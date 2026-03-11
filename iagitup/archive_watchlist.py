@@ -16,6 +16,8 @@ Usage:
     python archive_watchlist.py --top-n 10       # quick test
     python archive_watchlist.py --days 7         # top repos created in the last week
     python archive_watchlist.py --days 30        # top repos created in the last month
+    python archive_watchlist.py --since 2025-01-01 --until 2025-06-30  # date range
+    python archive_watchlist.py --since 2025-01-01  # everything since a date
     python archive_watchlist.py --workers 8      # more parallelism
     python archive_watchlist.py --dry-run        # preview without uploading
     python archive_watchlist.py --state-file /path/to/state.json
@@ -97,7 +99,12 @@ def save_state(path: Path, state: dict) -> None:
 # GitHub API
 # ---------------------------------------------------------------------------
 
-def fetch_top_repos(n: int, days: int | None = None) -> list[dict]:
+def fetch_top_repos(
+    n: int,
+    days: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
     """Fetch the top-N most-starred GitHub repositories via the Search API.
 
     Uses the GITHUB_TOKEN environment variable (via ``_github_headers``) when
@@ -108,6 +115,11 @@ def fetch_top_repos(n: int, days: int | None = None) -> list[dict]:
         days: If set, only include repositories created within the last
             ``days`` days.  When ``None`` (default), no creation-date filter
             is applied and the query returns the all-time most-starred repos.
+        since: If set, only include repositories created on or after this date
+            (YYYY-MM-DD).  Mutually exclusive with ``days``.
+        until: If set, only include repositories created on or before this date
+            (YYYY-MM-DD).  Can be combined with ``since`` for a date range, or
+            used alone (matches all repos created up to that date).
 
     Returns:
         List of raw repository dicts from the GitHub API.
@@ -123,6 +135,13 @@ def fetch_top_repos(n: int, days: int | None = None) -> list[dict]:
     if days is not None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         query += f" created:>{cutoff}"
+    elif since is not None or until is not None:
+        if since and until:
+            query += f" created:{since}..{until}"
+        elif since:
+            query += f" created:>={since}"
+        else:
+            query += f" created:<={until}"
 
     params = {
         "q": query,
@@ -300,6 +319,14 @@ def main() -> None:
         help="Only consider repos created within the last N days (default: all-time).",
     )
     parser.add_argument(
+        "--since", type=str, default=None,
+        help="Only consider repos created on or after this date (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--until", type=str, default=None,
+        help="Only consider repos created on or before this date (YYYY-MM-DD).",
+    )
+    parser.add_argument(
         "--workers", type=int, default=4,
         help="Number of parallel archive workers (default: 4).",
     )
@@ -319,8 +346,27 @@ def main() -> None:
     if args.top_n > 100:
         parser.error("--top-n cannot exceed 100 (GitHub Search API limit per page).")
 
+    if args.days is not None and (args.since or args.until):
+        parser.error("--days cannot be combined with --since/--until.")
+
+    # Validate date format for --since and --until.
+    for flag in ("since", "until"):
+        value = getattr(args, flag)
+        if value is not None:
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                parser.error(f"--{flag} must be a valid date in YYYY-MM-DD format.")
+
     if args.days is not None:
         log.info(f"Filtering repos created within the last {args.days} day(s).")
+    if args.since or args.until:
+        parts = []
+        if args.since:
+            parts.append(f"from {args.since}")
+        if args.until:
+            parts.append(f"until {args.until}")
+        log.info(f"Filtering repos created {' '.join(parts)}.")
     if args.dry_run:
         log.info("DRY-RUN mode — nothing will be uploaded.")
 
@@ -335,7 +381,7 @@ def main() -> None:
             sys.exit(1)
 
     state = load_state(args.state_file)
-    repos = fetch_top_repos(args.top_n, days=args.days)
+    repos = fetch_top_repos(args.top_n, days=args.days, since=args.since, until=args.until)
 
     counts: dict[str, int] = {"archived": 0, "skipped": 0, "failed": 0}
     # save_lock guards concurrent writes to the state file on disk.
