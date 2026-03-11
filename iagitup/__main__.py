@@ -26,6 +26,7 @@ import argparse
 import logging
 import shutil
 import sys
+from pathlib import Path
 
 from iagitup.iagitup import (
     IagitupError,
@@ -53,6 +54,10 @@ def main() -> None:
         default=None,
         type=str,
         help="Custom metadata as comma-separated key:value pairs (e.g. foo:bar,baz:qux)",
+    )
+    parser.add_argument(
+        "--work-dir", type=str, default=None,
+        help="Directory for temporary clones (default: system temp directory).",
     )
     parser.add_argument("--version", "-v", action="version", version=__version__)
     parser.add_argument(
@@ -83,7 +88,8 @@ def main() -> None:
     print(f":: Downloading {args.repo_url} ...")
     repo_folder = None  # track for cleanup in all exit paths
     try:
-        repo_data, repo_folder = repo_download(args.repo_url)
+        work_dir = Path(args.work_dir) if args.work_dir else None
+        repo_data, repo_folder = repo_download(args.repo_url, work_dir=work_dir)
 
         identifier, meta, bundle_stem = upload_ia(
             repo_folder,

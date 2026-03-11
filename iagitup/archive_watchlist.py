@@ -226,6 +226,7 @@ def archive_repo(
     s3_secret: str,
     state: dict,
     dry_run: bool,
+    work_dir: Path | None = None,
 ) -> str:
     """Download and archive a single repository, updating the state on success.
 
@@ -245,6 +246,7 @@ def archive_repo(
         s3_secret: Internet Archive S3 secret key.
         state: Shared state dict (updated in-place on successful archive).
         dry_run: When True, log what would happen without uploading anything.
+        work_dir: Parent directory for temporary clones (``None`` = system temp).
 
     Returns:
         ``"skipped"``, ``"archived"``, or ``"failed"``.
@@ -268,7 +270,7 @@ def archive_repo(
 
     repo_folder: Path | None = None
     try:
-        _, repo_folder = repo_download(repo_data["html_url"])
+        _, repo_folder = repo_download(repo_data["html_url"], work_dir=work_dir)
         custom_meta = build_custom_meta(repo_data, rank)
         identifier, _, _ = upload_ia(
             repo_folder,
@@ -335,6 +337,10 @@ def main() -> None:
     parser.add_argument(
         "--workers", type=int, default=4,
         help="Number of parallel archive workers (default: 4).",
+    )
+    parser.add_argument(
+        "--work-dir", type=str, default=None,
+        help="Directory for temporary clones (default: system temp directory).",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -405,9 +411,11 @@ def main() -> None:
     save_lock = threading.Lock()
     counts_lock = threading.Lock()
 
+    work_dir = Path(args.work_dir) if args.work_dir else None
+
     def run(rank: int, repo_data: dict) -> str:
         """Worker: archive one repo and persist state on success."""
-        result = archive_repo(repo_data, rank, s3_access, s3_secret, state, args.dry_run)
+        result = archive_repo(repo_data, rank, s3_access, s3_secret, state, args.dry_run, work_dir=work_dir)
         with counts_lock:
             counts[result] += 1
         # Persist state only when something changed (not on skips) to reduce

@@ -1,7 +1,7 @@
 <h1 align="center">iagitup</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.6.0-blue?style=flat" alt="Version 3.6.0">
+  <img src="https://img.shields.io/badge/version-3.6.1-blue?style=flat" alt="Version 3.6.1">
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>
   <a href="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml"><img src="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
@@ -128,6 +128,7 @@ iagitup [options] <repo_url>
 |---|---|---|---|
 | `repo_url` | -- | *(required)* | Git repository URL to archive (GitHub, GitLab, Bitbucket, or any HTTPS git URL) |
 | `--metadata` | `-m` | -- | Custom metadata fields (see [Custom Metadata](#custom-metadata)) |
+| `--work-dir` | -- | system temp | Directory for temporary clones |
 | `--version` | `-v` | -- | Print version and exit |
 
 ### `archive-watchlist`
@@ -143,6 +144,7 @@ archive-watchlist [options]
 | `--since DATE` | -- | Only consider repos created on or after DATE (YYYY-MM-DD) |
 | `--until DATE` | -- | Only consider repos created on or before DATE (YYYY-MM-DD) |
 | `--max-size MB` | *(no limit)* | Skip repos larger than this size in MB (based on GitHub's reported size) |
+| `--work-dir PATH` | system temp | Directory for temporary clones |
 | `--workers N` | `4` | Number of parallel archive workers |
 | `--dry-run` | off | Preview what would be archived -- no uploads, no state changes |
 | `--state-file PATH` | `./watchlist_state.json` | Path to the persistent state cache |

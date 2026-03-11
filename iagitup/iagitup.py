@@ -17,7 +17,7 @@ __author__ = "Giovanni Damiola"
 __copyright__ = "Copyright 2018-2026, Giovanni Damiola"
 __main_name__ = "iagitup"
 __license__ = "GPLv3"
-__version__ = "3.6.0"
+__version__ = "3.6.1"
 
 import configparser
 import logging
@@ -195,7 +195,7 @@ def _build_repo_data_from_clone(
 # Download
 # ---------------------------------------------------------------------------
 
-def repo_download(repo_url: str) -> tuple[dict, Path]:
+def repo_download(repo_url: str, work_dir: Path | None = None) -> tuple[dict, Path]:
     """Download a git repository to a local temporary directory.
 
     For GitHub URLs, metadata is fetched from the GitHub API.  For all other
@@ -208,6 +208,8 @@ def repo_download(repo_url: str) -> tuple[dict, Path]:
 
     Args:
         repo_url: The git repository URL.
+        work_dir: Parent directory for the temporary clone.  When ``None``
+            (default), the system temp directory is used.
 
     Returns:
         Tuple of (metadata_dict, local_repo_path).
@@ -241,7 +243,7 @@ def repo_download(repo_url: str) -> tuple[dict, Path]:
 
     # mkdtemp creates an isolated directory; the wiki (if any) will live
     # alongside the repo clone inside this same root.
-    download_dir = Path(tempfile.mkdtemp())
+    download_dir = Path(tempfile.mkdtemp(dir=work_dir))
     repo_folder = download_dir / repo_name
 
     log.info(f"Cloning {clone_url} ...")
