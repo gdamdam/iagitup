@@ -1,4 +1,4 @@
-# iagitup
+<h1 align="center">iagitup</h1>
 
 [![PyPI version](https://img.shields.io/pypi/v/iagitup)](https://pypi.org/project/iagitup/)
 [![Python versions](https://img.shields.io/pypi/pyversions/iagitup)](https://pypi.org/project/iagitup/)
