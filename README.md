@@ -1,8 +1,10 @@
 <h1 align="center">iagitup</h1>
 
-[![PyPI version](https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0)](https://pypi.org/project/iagitup/)
-[![Python versions](https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0)](https://pypi.org/project/iagitup/)
-[![License: GPLv3](https://img.shields.io/pypi/l/iagitup?style=flat&cache_seconds=0)](https://www.gnu.org/licenses/gpl-3.0)
+<p align="center">
+  <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>
+  <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/pypi/l/iagitup?style=flat&cache_seconds=0" alt="License: GPLv3"></a>
+</p>
 
 
 **Archive GitHub repositories to the [Internet Archive](https://archive.org).**
