@@ -2,7 +2,8 @@
 """archive_watchlist.py — Archive the top-N most-starred GitHub repos to the Internet Archive.
 
 Designed to be run as a single-shot script (e.g. via cron). On each run it:
-  1. Fetches the top-N repos from the GitHub Search API (sorted by stars).
+  1. Fetches the top-N repos from the GitHub Search API (sorted by stars,
+     optionally filtered to repos created within the last --days days).
   2. Compares each repo's pushed_at timestamp against a local state cache.
   3. Skips repos that haven't changed since the last run.
   4. Archives new or updated repos using iagitup, injecting rich popularity metadata.
@@ -11,8 +12,10 @@ Designed to be run as a single-shot script (e.g. via cron). On each run it:
 Repos are archived in parallel using a configurable worker pool (--workers).
 
 Usage:
-    python archive_watchlist.py                  # archive top 100, 4 workers
+    python archive_watchlist.py                  # archive top 100 (all-time), 4 workers
     python archive_watchlist.py --top-n 10       # quick test
+    python archive_watchlist.py --days 7         # top repos created in the last week
+    python archive_watchlist.py --days 30        # top repos created in the last month
     python archive_watchlist.py --workers 8      # more parallelism
     python archive_watchlist.py --dry-run        # preview without uploading
     python archive_watchlist.py --state-file /path/to/state.json
@@ -28,7 +31,7 @@ import shutil
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -94,7 +97,7 @@ def save_state(path: Path, state: dict) -> None:
 # GitHub API
 # ---------------------------------------------------------------------------
 
-def fetch_top_repos(n: int) -> list[dict]:
+def fetch_top_repos(n: int, days: int | None = None) -> list[dict]:
     """Fetch the top-N most-starred GitHub repositories via the Search API.
 
     Uses the GITHUB_TOKEN environment variable (via ``_github_headers``) when
@@ -102,6 +105,9 @@ def fetch_top_repos(n: int) -> list[dict]:
 
     Args:
         n: Number of repositories to fetch. Capped at 100 (API page limit).
+        days: If set, only include repositories created within the last
+            ``days`` days.  When ``None`` (default), no creation-date filter
+            is applied and the query returns the all-time most-starred repos.
 
     Returns:
         List of raw repository dicts from the GitHub API.
@@ -112,10 +118,14 @@ def fetch_top_repos(n: int) -> list[dict]:
     # GitHub Search API returns at most 100 results per page; we don't
     # paginate because the top-100-by-stars use case rarely needs more.
     per_page = min(n, 100)
+
+    query = "stars:>1"
+    if days is not None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        query += f" created:>{cutoff}"
+
     params = {
-        # "stars:>1" is a minimal filter that effectively means "all repos
-        # with at least 2 stars", combined with sort=stars to get the top ones.
-        "q": "stars:>1",
+        "q": query,
         "sort": "stars",
         "order": "desc",
         "per_page": per_page,
@@ -286,6 +296,10 @@ def main() -> None:
         help="Number of top repositories to check (default: 100, max: 100).",
     )
     parser.add_argument(
+        "--days", type=int, default=None,
+        help="Only consider repos created within the last N days (default: all-time).",
+    )
+    parser.add_argument(
         "--workers", type=int, default=4,
         help="Number of parallel archive workers (default: 4).",
     )
@@ -305,6 +319,8 @@ def main() -> None:
     if args.top_n > 100:
         parser.error("--top-n cannot exceed 100 (GitHub Search API limit per page).")
 
+    if args.days is not None:
+        log.info(f"Filtering repos created within the last {args.days} day(s).")
     if args.dry_run:
         log.info("DRY-RUN mode — nothing will be uploaded.")
 
@@ -319,7 +335,7 @@ def main() -> None:
             sys.exit(1)
 
     state = load_state(args.state_file)
-    repos = fetch_top_repos(args.top_n)
+    repos = fetch_top_repos(args.top_n, days=args.days)
 
     counts: dict[str, int] = {"archived": 0, "skipped": 0, "failed": 0}
     # save_lock guards concurrent writes to the state file on disk.

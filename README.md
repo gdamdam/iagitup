@@ -1,7 +1,7 @@
 <h1 align="center">iagitup</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.3.0-blue?style=flat" alt="Version 3.3.0">
+  <img src="https://img.shields.io/badge/version-3.4.0-blue?style=flat" alt="Version 3.4.0">
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>
   <a href="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml"><img src="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
@@ -11,7 +11,7 @@
 
 **Archive git repositories to the [Internet Archive](https://archive.org).**
 
-`iagitup` clones a git repository from GitHub, GitLab, Bitbucket, Codeberg, or any HTTPS git URL, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the Internet Archive with rich metadata. GitHub repos get full API metadata; all other platforms extract metadata from the local git history. If the repository has a wiki (GitHub only), that is bundled and uploaded too. A companion command, `archive-watchlist`, continuously archives the most-starred repositories on GitHub.
+`iagitup` clones a git repository from GitHub, GitLab, Bitbucket, Codeberg, or any HTTPS git URL, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the Internet Archive with rich metadata. GitHub repos get full API metadata; all other platforms extract metadata from the local git history. If the repository has a wiki (GitHub only), that is bundled and uploaded too. A companion command, `archive-watchlist`, continuously archives the most-starred repositories on GitHub -- either all-time or created within the last N days.
 
 ---
 
@@ -23,7 +23,7 @@
 - **Wiki archiving** -- wiki repositories are detected and bundled automatically (GitHub only).
 - **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item. GitHub repos get full API metadata; other platforms extract metadata from git history.
 - **Duplicate prevention** -- two layers (local state cache + IA item check) ensure the same snapshot is never uploaded twice.
-- **Bulk archiving** -- `archive-watchlist` fetches and archives the top-N most-starred GitHub repos on a schedule.
+- **Bulk archiving** -- `archive-watchlist` fetches and archives the top-N most-starred GitHub repos on a schedule, with an optional `--days` filter for trending repos.
 - **Parallel workers** -- configurable concurrency for bulk runs.
 - **Custom metadata** -- pass extra `key:value` pairs to enrich any upload.
 
@@ -97,6 +97,12 @@ archive-watchlist --dry-run --top-n 10
 
 # Full run with 8 parallel workers
 archive-watchlist --workers 8
+
+# Archive the most-starred repos created in the last 7 days
+archive-watchlist --days 7
+
+# Preview trending repos from the last month
+archive-watchlist --days 30 --dry-run --top-n 20
 ```
 
 ---
@@ -124,6 +130,7 @@ archive-watchlist [options]
 | Flag | Default | Description |
 |---|---|---|
 | `--top-n N` | `100` | Number of top repositories to fetch and check (max 100) |
+| `--days N` | *(all-time)* | Only consider repos created within the last N days |
 | `--workers N` | `4` | Number of parallel archive workers |
 | `--dry-run` | off | Preview what would be archived -- no uploads, no state changes |
 | `--state-file PATH` | `./watchlist_state.json` | Path to the persistent state cache |
@@ -134,6 +141,12 @@ Examples:
 ```bash
 # Use a custom state file
 archive-watchlist --state-file /var/lib/iagitup/state.json
+
+# Archive trending repos from the past week
+archive-watchlist --days 7
+
+# Combine with top-n for a quick daily trending sweep
+archive-watchlist --days 1 --top-n 20 --dry-run
 ```
 
 ---
@@ -236,7 +249,7 @@ Each archived repository becomes a single IA item containing:
 
 ### Bulk archiving (`archive-watchlist`)
 
-1. Fetches the top-N repos from the GitHub Search API (sorted by stars).
+1. Fetches the top-N repos from the GitHub Search API (sorted by stars, optionally filtered to repos created within the last `--days` days).
 2. Compares each repo's `pushed_at` against a local state cache.
 3. **Skips** unchanged repos instantly (no network, no IA call).
 4. **Archives** new or updated repos via iagitup, enriched with popularity metadata.

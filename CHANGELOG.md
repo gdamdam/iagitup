@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.0] - 2026-03-11
+
+### Added
+
+- **`--days N` flag for `archive-watchlist`** -- filter repositories by creation date, archiving only repos created within the last N days. Uses GitHub's `created:>YYYY-MM-DD` search qualifier. Without `--days`, behavior is unchanged (all-time most-starred).
+
 ## [3.3.0] - 2026-03-11
 
 ### Added
