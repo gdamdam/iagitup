@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""iagitup - Core logic for archiving GitHub repositories to the Internet Archive.
+"""iagitup - Core logic for archiving git repositories to the Internet Archive.
 
 This module handles the full archival pipeline:
-  1. Parsing and validating GitHub URLs
-  2. Fetching repository metadata from the GitHub API
+  1. Parsing and validating repository URLs (GitHub, GitLab, Bitbucket, etc.)
+  2. Fetching repository metadata (GitHub API for github.com, git history for others)
   3. Cloning repos (and optional wikis) to temporary directories
   4. Creating ``git bundle`` snapshots (single-file, fully portable archives)
   5. Uploading bundles + metadata to the Internet Archive via the S3-like API
@@ -17,7 +17,7 @@ __author__ = "Giovanni Damiola"
 __copyright__ = "Copyright 2018-2026, Giovanni Damiola"
 __main_name__ = "iagitup"
 __license__ = "GPLv3"
-__version__ = "3.2.0"
+__version__ = "3.3.0"
 
 import configparser
 import logging
@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -67,31 +67,47 @@ class LfsError(IagitupError):
 
 
 # ---------------------------------------------------------------------------
-# GitHub helpers
+# Platform helpers
 # ---------------------------------------------------------------------------
 
-def _parse_github_url(url: str) -> tuple[str, str]:
-    """Parse a GitHub URL and return (owner, repo_name).
+# Maps hostnames to human-readable labels used in IA subject tags.
+# Unknown hostnames fall through to the raw hostname string.
+_PLATFORM_LABELS = {
+    "github.com": "GitHub",
+    "gitlab.com": "GitLab",
+    "bitbucket.org": "Bitbucket",
+    "codeberg.org": "Codeberg",
+}
+
+
+def _platform_label(hostname: str) -> str:
+    """Return a human-readable label for a git hosting platform."""
+    return _PLATFORM_LABELS.get(hostname, hostname)
+
+
+def _parse_repo_url(url: str) -> tuple[str, str, str]:
+    """Parse a git repository URL and return (owner, repo_name, hostname).
 
     Handles trailing slashes and .git suffixes gracefully.
 
     Args:
-        url: GitHub repository URL, e.g. https://github.com/owner/repo.git
+        url: Git repository URL, e.g. https://github.com/owner/repo.git
 
     Returns:
-        Tuple of (owner, repo_name).
+        Tuple of (owner, repo_name, hostname).
 
     Raises:
         RepoDownloadError: If the URL path does not contain both owner and repo.
     """
     parsed = urlparse(url.rstrip("/"))
+    hostname = parsed.hostname or ""
     # Filter empty strings that arise from leading/trailing/double slashes.
     parts = [p for p in parsed.path.strip("/").split("/") if p]
     if len(parts) < 2:
-        raise RepoDownloadError(f"Invalid GitHub URL: {url}")
+        raise RepoDownloadError(f"Invalid repository URL: {url}")
     owner = parts[0]
     repo = parts[1].removesuffix(".git")
-    return owner, repo
+    return owner, repo, hostname
 
 
 def _github_headers() -> dict[str, str]:
@@ -113,52 +129,147 @@ def _github_headers() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Generic (non-GitHub) metadata
+# ---------------------------------------------------------------------------
+
+def _build_repo_data_from_clone(
+    url: str, owner: str, repo: str, hostname: str, repo_folder: Path,
+) -> dict:
+    """Build a metadata dict from a locally cloned repository.
+
+    Used for non-GitHub platforms where no API metadata is available.
+    Extracts the last commit date from the git history and constructs
+    a dict that mirrors the shape of a GitHub API response.
+
+    Args:
+        url: Original repository URL.
+        owner: Repository owner/namespace.
+        repo: Repository name.
+        hostname: Git hosting platform hostname.
+        repo_folder: Path to the locally cloned repository.
+
+    Returns:
+        Metadata dict with the same keys used by the GitHub code path.
+    """
+    # Get the last commit date from git history.
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%aI"],
+            cwd=repo_folder,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        raw_date = result.stdout.strip()
+        # Parse the ISO 8601 date and convert to UTC.
+        local_dt = datetime.fromisoformat(raw_date)
+        utc_dt = local_dt.astimezone(timezone.utc)
+        pushed_at = utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (subprocess.CalledProcessError, ValueError):
+        # Empty repo or unparseable date — fall back to current UTC time.
+        pushed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Strip .git suffix so html_url is a clean browser-friendly link.
+    html_url = url.removesuffix(".git").rstrip("/")
+    owner_url = f"https://{hostname}/{owner}"
+
+    # Return a dict that mirrors the shape of a GitHub API response so that
+    # upload_ia() can treat both code paths identically.
+    return {
+        "clone_url": url,                  # used by repo_download for cloning
+        "full_name": f"{owner}/{repo}",    # "owner/repo" — same as GitHub
+        "html_url": html_url,              # browser URL for the repo
+        "pushed_at": pushed_at,            # UTC timestamp of last commit
+        "description": "",                 # no API description available
+        "owner": {
+            "login": owner,
+            "html_url": owner_url,
+            "avatar_url": None,            # no avatar without a platform API
+        },
+        "has_wiki": False,                 # wiki detection is GitHub-only
+        "_platform": hostname,             # identifies the hosting platform
+    }
+
+
+# ---------------------------------------------------------------------------
 # Download
 # ---------------------------------------------------------------------------
 
-def repo_download(github_repo_url: str) -> tuple[dict, Path]:
-    """Download a GitHub repository to a local temporary directory.
+def repo_download(repo_url: str) -> tuple[dict, Path]:
+    """Download a git repository to a local temporary directory.
+
+    For GitHub URLs, metadata is fetched from the GitHub API.  For all other
+    platforms the repository is cloned directly and metadata is extracted from
+    the local git history via ``_build_repo_data_from_clone``.
 
     The caller is responsible for cleaning up the *parent* of the returned
     path (i.e. ``repo_folder.parent``), which is the mkdtemp root and may
     also contain a ``wiki/`` subdirectory created by ``_download_wiki``.
 
     Args:
-        github_repo_url: The GitHub repository URL.
+        repo_url: The git repository URL.
 
     Returns:
-        Tuple of (github_api_metadata_dict, local_repo_path).
+        Tuple of (metadata_dict, local_repo_path).
 
     Raises:
-        RepoDownloadError: If the GitHub API call fails or the clone fails.
+        RepoDownloadError: If the API call / clone fails.
     """
-    owner, repo_name = _parse_github_url(github_repo_url)
-    api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
+    owner, repo_name, hostname = _parse_repo_url(repo_url)
 
-    resp = requests.get(api_url, headers=_github_headers(), timeout=30)
-    if resp.status_code != 200:
-        raise RepoDownloadError(
-            f"GitHub API returned {resp.status_code} for {github_repo_url}"
-        )
+    if hostname == "github.com":
+        # --- GitHub path: rich API metadata ---
+        api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
 
-    gh_repo_data: dict = resp.json()
+        resp = requests.get(api_url, headers=_github_headers(), timeout=30)
+        if resp.status_code != 200:
+            raise RepoDownloadError(
+                f"GitHub API returned {resp.status_code} for {repo_url}"
+            )
+
+        repo_data: dict = resp.json()
+        # Inject platform marker so upload_ia() can build platform-aware
+        # identifiers and subject tags from a single code path.
+        repo_data["_platform"] = "github.com"
+        clone_url = repo_data["clone_url"]
+    else:
+        # --- Generic path: clone directly, extract metadata from git history ---
+        # We don't call any platform API; metadata is built after the clone
+        # completes via _build_repo_data_from_clone().
+        clone_url = repo_url
+        repo_data = None
 
     # mkdtemp creates an isolated directory; the wiki (if any) will live
     # alongside the repo clone inside this same root.
     download_dir = Path(tempfile.mkdtemp())
     repo_folder = download_dir / repo_name
 
-    log.info(f"Cloning {gh_repo_data['clone_url']} ...")
+    log.info(f"Cloning {clone_url} ...")
     try:
-        git.Git().clone(gh_repo_data["clone_url"], str(repo_folder))
-    except git.GitCommandError as exc:
+        # Use subprocess directly instead of GitPython so that git's
+        # transfer progress (counting, compressing, receiving objects)
+        # is streamed to stderr in real time.  The --progress flag forces
+        # progress output even when stderr is not a TTY.
+        subprocess.check_call(
+            ["git", "clone", "--progress", clone_url, str(repo_folder)],
+        )
+    except subprocess.CalledProcessError as exc:
         # Clean the whole temp dir on failure so nothing leaks.
         shutil.rmtree(download_dir, ignore_errors=True)
         raise RepoDownloadError(
-            f"Failed to clone {github_repo_url}: {exc}"
+            f"Failed to clone {repo_url}: {exc}"
         ) from exc
+    except KeyboardInterrupt:
+        # User pressed Ctrl+C during clone — clean up before re-raising.
+        shutil.rmtree(download_dir, ignore_errors=True)
+        raise
 
-    return gh_repo_data, repo_folder
+    if repo_data is None:
+        repo_data = _build_repo_data_from_clone(
+            repo_url, owner, repo_name, hostname, repo_folder,
+        )
+
+    return repo_data, repo_folder
 
 
 def _download_avatar(avatar_url: str, dest_path: Path) -> Path | None:
@@ -351,8 +462,8 @@ def _fetch_and_archive_lfs(repo_folder: Path, archive_name: str) -> Path | None:
 # ---------------------------------------------------------------------------
 
 def upload_ia(
-    gh_repo_folder: Path,
-    gh_repo_data: dict,
+    repo_folder: Path,
+    repo_data: dict,
     s3_access: str,
     s3_secret: str,
     custom_meta: dict | None = None,
@@ -370,13 +481,13 @@ def upload_ia(
     5. Create git bundles for the repo and, if available, the wiki.
     6. Upload all files to the IA item sequentially.
 
-    Note: callers must clean up ``gh_repo_folder.parent`` (the mkdtemp root)
+    Note: callers must clean up ``repo_folder.parent`` (the mkdtemp root)
     after this function returns, as ``_download_wiki`` may have created a
     ``wiki/`` subdirectory alongside the main clone.
 
     Args:
-        gh_repo_folder: Path to the locally cloned repository.
-        gh_repo_data: Metadata dict from the GitHub API.
+        repo_folder: Path to the locally cloned repository.
+        repo_data: Metadata dict (from GitHub API or ``_build_repo_data_from_clone``).
         s3_access: Internet Archive S3 access key.
         s3_secret: Internet Archive S3 secret key.
         custom_meta: Optional extra metadata fields merged into the IA item
@@ -388,27 +499,30 @@ def upload_ia(
     Raises:
         UploadError: If bundle creation or any IA upload fails.
     """
-    # --- Derive names and timestamps from the GitHub push date ---
+    # --- Derive names and timestamps from the push date ---
     # Using pushed_at (not created_at) ensures a new IA item is created
     # whenever the repo receives new commits, while unchanged repos reuse
     # the same identifier and are de-duplicated via the early-exit below.
-    pushed = datetime.strptime(gh_repo_data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
+    pushed = datetime.strptime(repo_data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
     pushed_date = pushed.strftime("%Y-%m-%d_%H-%M-%S")     # for filenames / identifiers (no spaces)
     raw_pushed_date = pushed.strftime("%Y-%m-%d %H:%M:%S")  # human-readable, stored in IA metadata
     date = pushed.strftime("%Y-%m-%d")
     year = pushed.year
 
     # "owner/repo" -> "owner-repo" because IA identifiers cannot contain slashes.
-    repo_name = gh_repo_data["full_name"].replace("/", "-")
-    original_url = gh_repo_data["html_url"]
+    repo_name = repo_data["full_name"].replace("/", "-")
+    original_url = repo_data["html_url"]
     # bundle_stem doubles as the IA item identifier suffix and the .bundle
     # filename, keeping both in sync for predictable download URLs.
     bundle_stem = f"{repo_name}_-_{pushed_date}"
-    # IA identifier format: "github.com-owner-repo_-_YYYY-MM-DD_HH-MM-SS"
-    itemname = f"github.com-{repo_name}_-_{pushed_date}"
+    # IA identifier format: "<platform>-owner-repo_-_YYYY-MM-DD_HH-MM-SS"
+    # Default to "github.com" for backward compatibility with existing dicts
+    # (e.g. from archive_watchlist) that don't include "_platform".
+    platform = repo_data.get("_platform", "github.com")
+    itemname = f"{platform}-{repo_name}_-_{pushed_date}"
 
-    owner_url = gh_repo_data["owner"]["html_url"]
-    owner_name = gh_repo_data["owner"]["login"]
+    owner_url = repo_data["owner"]["html_url"]
+    owner_name = repo_data["owner"]["login"]
 
     # --- Early-exit: avoid redundant work if IA already has this snapshot ---
     # The identifier encodes pushed_at, so a new push creates a new item and
@@ -433,26 +547,32 @@ def upload_ia(
     # --- Concurrently download avatar + clone wiki (both are network I/O) ---
     cover_path: Path | None = None
     wiki_folder: Path | None = None
+    # Non-GitHub platforms have avatar_url=None; skip the download to avoid
+    # passing None to requests.get().
+    avatar_url = repo_data["owner"].get("avatar_url")
     with ThreadPoolExecutor(max_workers=2) as pool:
-        avatar_future = pool.submit(
-            _download_avatar,
-            gh_repo_data["owner"]["avatar_url"],
-            gh_repo_folder / "cover.jpg",
-        )
+        if avatar_url:
+            avatar_future = pool.submit(
+                _download_avatar,
+                avatar_url,
+                repo_folder / "cover.jpg",
+            )
+        else:
+            avatar_future = None
         wiki_future = pool.submit(
             _download_wiki,
-            gh_repo_data,
-            gh_repo_folder.parent,  # wiki/ lands next to the main clone
+            repo_data,
+            repo_folder.parent,  # wiki/ lands next to the main clone
         )
-        cover_path = avatar_future.result()
+        cover_path = avatar_future.result() if avatar_future else None
         wiki_folder = wiki_future.result()
 
     # --- Detect and fetch LFS objects ---
-    has_lfs = _detect_lfs(gh_repo_folder)
+    has_lfs = _detect_lfs(repo_folder)
     lfs_archive_path: Path | None = None
     if has_lfs:
         log.info("Git LFS detected — fetching LFS objects ...")
-        lfs_archive_path = _fetch_and_archive_lfs(gh_repo_folder, bundle_stem)
+        lfs_archive_path = _fetch_and_archive_lfs(repo_folder, bundle_stem)
 
     # --- Build HTML restore instructions ---
     restore_snippet = (
@@ -463,7 +583,7 @@ def upload_ia(
         lfs_url = f"https://archive.org/download/{itemname}/{bundle_stem}_lfs.tar.gz"
         restore_snippet += (
             f"<br/><br/>This repository uses Git LFS. To restore LFS objects:"
-            f"<pre><code>cd {gh_repo_data['full_name'].split('/')[-1]}\n"
+            f"<pre><code>cd {repo_data['full_name'].split('/')[-1]}\n"
             f"wget {lfs_url}\n"
             f"mkdir -p .git/lfs\n"
             f"tar -xzf {bundle_stem}_lfs.tar.gz -C .git/\n"
@@ -472,8 +592,8 @@ def upload_ia(
         )
 
     description = (
-        f"<br/>{gh_repo_data.get('description', '')}<br/><br/>"
-        f"{get_description_from_readme(gh_repo_folder)}<br/>"
+        f"<br/>{repo_data.get('description', '')}<br/><br/>"
+        f"{get_description_from_readme(repo_folder)}<br/>"
         f"{restore_snippet}<br/><br/>"
         f'Source: <a href="{original_url}">{original_url}</a><br/>'
         f'Uploader: <a href="{owner_url}">{owner_name}</a><br/>'
@@ -505,7 +625,7 @@ def upload_ia(
         title=itemname,
         year=str(year),
         date=date,
-        subject="GitHub;code;software;git",
+        subject=f"{_platform_label(platform)};code;software;git",
         uploaded_with=uploader_tag,
         originalurl=original_url,
         pushed_date=raw_pushed_date,
@@ -518,7 +638,7 @@ def upload_ia(
 
     # --- Create the main git bundle ---
     try:
-        bundle_file = create_bundle(gh_repo_folder, bundle_stem)
+        bundle_file = create_bundle(repo_folder, bundle_stem)
     except BundleError as exc:
         raise UploadError(f"Bundle creation failed: {exc}") from exc
 

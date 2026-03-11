@@ -8,18 +8,19 @@
 </p>
 
 
-**Archive GitHub repositories to the [Internet Archive](https://archive.org).**
+**Archive git repositories to the [Internet Archive](https://archive.org).**
 
-`iagitup` clones a GitHub repository, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the Internet Archive with rich metadata. If the repository has a wiki, that is bundled and uploaded too. A companion command, `archive-watchlist`, continuously archives the most-starred repositories on GitHub.
+`iagitup` clones a git repository from GitHub, GitLab, Bitbucket, Codeberg, or any HTTPS git URL, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the Internet Archive with rich metadata. GitHub repos get full API metadata; all other platforms extract metadata from the local git history. If the repository has a wiki (GitHub only), that is bundled and uploaded too. A companion command, `archive-watchlist`, continuously archives the most-starred repositories on GitHub.
 
 ---
 
 ## Features
 
+- **Multi-platform support** -- GitHub, GitLab, Bitbucket, Codeberg, self-hosted Gitea/Forgejo, and any HTTPS git URL.
 - **Full-fidelity snapshots** -- every branch, tag, and ref is preserved in a single git bundle.
 - **Git LFS support** -- LFS-enabled repos are detected automatically; large file objects are fetched and archived alongside the bundle.
-- **Wiki archiving** -- wiki repositories are detected and bundled automatically.
-- **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item.
+- **Wiki archiving** -- wiki repositories are detected and bundled automatically (GitHub only).
+- **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item. GitHub repos get full API metadata; other platforms extract metadata from git history.
 - **Duplicate prevention** -- two layers (local state cache + IA item check) ensure the same snapshot is never uploaded twice.
 - **Bulk archiving** -- `archive-watchlist` fetches and archives the top-N most-starred GitHub repos on a schedule.
 - **Parallel workers** -- configurable concurrency for bulk runs.
@@ -51,6 +52,8 @@ pip install .
 - `git` on `$PATH`
 - `git-lfs` on `$PATH` *(optional — needed to archive LFS objects; repos are still archived without it, but LFS pointers won't resolve)*
 - An [Internet Archive account](https://archive.org/account/login.createaccount.php)
+- **HTTPS URLs** are required (SSH `user@host:path` syntax is not supported)
+- For non-GitHub platforms, standard git authentication applies (credential helpers, `~/.netrc`, etc.)
 
 ---
 
@@ -59,7 +62,20 @@ pip install .
 ### Archive a single repository
 
 ```bash
+# GitHub
 iagitup https://github.com/torvalds/linux
+
+# GitLab
+iagitup https://gitlab.com/inkscape/inkscape
+
+# Bitbucket
+iagitup https://bitbucket.org/berkeleylab/upcxx
+
+# Codeberg
+iagitup https://codeberg.org/forgejo/forgejo
+
+# Any HTTPS git URL
+iagitup https://git.example.com/org/project
 ```
 
 ```
@@ -89,12 +105,12 @@ archive-watchlist --workers 8
 ### `iagitup`
 
 ```bash
-iagitup [options] <github_repo_url>
+iagitup [options] <repo_url>
 ```
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `github_url` | -- | *(required)* | GitHub repository URL to archive |
+| `repo_url` | -- | *(required)* | Git repository URL to archive (GitHub, GitLab, Bitbucket, or any HTTPS git URL) |
 | `--metadata` | `-m` | -- | Custom metadata fields (see [Custom Metadata](#custom-metadata)) |
 | `--version` | `-v` | -- | Print version and exit |
 
@@ -123,7 +139,7 @@ archive-watchlist --state-file /var/lib/iagitup/state.json
 
 ## Configuration
 
-### GitHub Authentication
+### GitHub Authentication (GitHub repos only)
 
 Unauthenticated GitHub API calls are rate-limited to **60 requests/hour**. Set `GITHUB_TOKEN` to raise this to **5,000/hour**:
 
@@ -176,8 +192,8 @@ Custom fields are **merged** into the default metadata. Any key that matches a d
 | `title` | IA item identifier |
 | `date` | Last push date (`YYYY-MM-DD`) |
 | `year` | Last push year |
-| `subject` | `GitHub;code;software;git` |
-| `originalurl` | GitHub repository URL |
+| `subject` | `{Platform};code;software;git` (e.g. `GitHub`, `GitLab`, `Bitbucket`) |
+| `originalurl` | Repository URL |
 | `pushed_date` | Full push timestamp (`YYYY-MM-DD HH:MM:SS`) |
 | `uploaded_with` | `iagitup-vX.X.X` |
 | `description` | HTML: repo description + README + restore instructions |
@@ -200,10 +216,10 @@ Custom fields are **merged** into the default metadata. Any key that matches a d
 
 ### Single repository (`iagitup`)
 
-1. **Fetches metadata** from the GitHub API (`pushed_at`, description, owner, topics, language, etc.).
-2. **Checks for duplicates** -- the IA item identifier is derived from the repo name and `pushed_at` timestamp (`github.com-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}`). If an item with that identifier already exists, iagitup exits early.
+1. **Fetches metadata** -- for GitHub repos, from the GitHub API (`pushed_at`, description, owner, etc.); for all other platforms, from the local git history after cloning.
+2. **Checks for duplicates** -- the IA item identifier is derived from the platform hostname, repo name, and `pushed_at` timestamp (`{platform}-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}`). If an item with that identifier already exists, iagitup exits early.
 3. **Clones the repository** in full (all branches and tags).
-4. **Downloads the owner's avatar** as a cover image (`cover.jpg`), concurrently with wiki cloning.
+4. **Downloads the owner's avatar** as a cover image (`cover.jpg`), concurrently with wiki cloning (GitHub only; skipped for other platforms).
 5. **Creates git bundles** (`git bundle create --all`) for the repository and, if present, the wiki.
 6. **Builds an HTML description** from the repo description, README (`.md` or `.txt`), and restore instructions.
 7. **Uploads** the bundle(s) and cover image to the Internet Archive.

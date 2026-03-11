@@ -15,13 +15,15 @@ from iagitup.iagitup import (
     RepoDownloadError,
     UploadError,
     __version__,
+    _build_repo_data_from_clone,
     _detect_lfs,
     _download_avatar,
     _download_wiki,
     _fetch_and_archive_lfs,
     _github_headers,
     _is_lfs_installed,
-    _parse_github_url,
+    _parse_repo_url,
+    _platform_label,
     create_bundle,
     get_description_from_readme,
     get_ia_credentials,
@@ -31,37 +33,146 @@ from iagitup.iagitup import (
 
 
 # ---------------------------------------------------------------------------
-# _parse_github_url
+# _parse_repo_url
 # ---------------------------------------------------------------------------
 
-class TestParseGithubUrl:
-    def test_standard_url(self):
-        owner, repo = _parse_github_url("https://github.com/gdamdam/iagitup")
+class TestParseRepoUrl:
+    def test_standard_github_url(self):
+        owner, repo, hostname = _parse_repo_url("https://github.com/gdamdam/iagitup")
         assert owner == "gdamdam"
         assert repo == "iagitup"
+        assert hostname == "github.com"
 
     def test_trailing_slash(self):
-        owner, repo = _parse_github_url("https://github.com/gdamdam/iagitup/")
+        owner, repo, hostname = _parse_repo_url("https://github.com/gdamdam/iagitup/")
         assert owner == "gdamdam"
         assert repo == "iagitup"
+        assert hostname == "github.com"
 
     def test_git_suffix(self):
-        owner, repo = _parse_github_url("https://github.com/gdamdam/iagitup.git")
+        owner, repo, hostname = _parse_repo_url("https://github.com/gdamdam/iagitup.git")
         assert owner == "gdamdam"
         assert repo == "iagitup"
+        assert hostname == "github.com"
 
     def test_git_suffix_with_trailing_slash(self):
-        owner, repo = _parse_github_url("https://github.com/gdamdam/iagitup.git/")
+        owner, repo, hostname = _parse_repo_url("https://github.com/gdamdam/iagitup.git/")
         assert owner == "gdamdam"
         assert repo == "iagitup"
+        assert hostname == "github.com"
 
     def test_invalid_url_no_repo(self):
-        with pytest.raises(RepoDownloadError):
-            _parse_github_url("https://github.com/gdamdam")
+        with pytest.raises(RepoDownloadError, match="Invalid repository URL"):
+            _parse_repo_url("https://github.com/gdamdam")
 
     def test_invalid_url_empty_path(self):
-        with pytest.raises(RepoDownloadError):
-            _parse_github_url("https://github.com/")
+        with pytest.raises(RepoDownloadError, match="Invalid repository URL"):
+            _parse_repo_url("https://github.com/")
+
+    def test_gitlab_url(self):
+        owner, repo, hostname = _parse_repo_url("https://gitlab.com/user/project")
+        assert owner == "user"
+        assert repo == "project"
+        assert hostname == "gitlab.com"
+
+    def test_bitbucket_url(self):
+        owner, repo, hostname = _parse_repo_url("https://bitbucket.org/team/repo.git")
+        assert owner == "team"
+        assert repo == "repo"
+        assert hostname == "bitbucket.org"
+
+    def test_codeberg_url(self):
+        owner, repo, hostname = _parse_repo_url("https://codeberg.org/user/project")
+        assert owner == "user"
+        assert repo == "project"
+        assert hostname == "codeberg.org"
+
+    def test_self_hosted_url(self):
+        owner, repo, hostname = _parse_repo_url("https://git.example.com/org/tool")
+        assert owner == "org"
+        assert repo == "tool"
+        assert hostname == "git.example.com"
+
+
+# ---------------------------------------------------------------------------
+# _platform_label
+# ---------------------------------------------------------------------------
+
+class TestPlatformLabel:
+    def test_known_platforms(self):
+        assert _platform_label("github.com") == "GitHub"
+        assert _platform_label("gitlab.com") == "GitLab"
+        assert _platform_label("bitbucket.org") == "Bitbucket"
+        assert _platform_label("codeberg.org") == "Codeberg"
+
+    def test_unknown_platform_returns_hostname(self):
+        assert _platform_label("git.example.com") == "git.example.com"
+
+
+# ---------------------------------------------------------------------------
+# _build_repo_data_from_clone
+# ---------------------------------------------------------------------------
+
+class TestBuildRepoDataFromClone:
+    def test_builds_metadata_from_real_repo(self, tmp_path: Path):
+        """Create a real git repo and verify all metadata keys."""
+        repo_dir = tmp_path / "myrepo"
+        repo_dir.mkdir()
+        subprocess.check_call(["git", "init"], cwd=repo_dir)
+        subprocess.check_call(
+            ["git", "config", "user.email", "test@test.com"], cwd=repo_dir
+        )
+        subprocess.check_call(
+            ["git", "config", "user.name", "Test"], cwd=repo_dir
+        )
+        (repo_dir / "hello.txt").write_text("hello")
+        subprocess.check_call(["git", "add", "."], cwd=repo_dir)
+        subprocess.check_call(["git", "commit", "-m", "init"], cwd=repo_dir)
+
+        data = _build_repo_data_from_clone(
+            "https://gitlab.com/myuser/myrepo.git",
+            "myuser", "myrepo", "gitlab.com", repo_dir,
+        )
+
+        assert data["clone_url"] == "https://gitlab.com/myuser/myrepo.git"
+        assert data["full_name"] == "myuser/myrepo"
+        assert data["html_url"] == "https://gitlab.com/myuser/myrepo"
+        assert data["description"] == ""
+        assert data["has_wiki"] is False
+        assert data["_platform"] == "gitlab.com"
+        assert data["owner"]["login"] == "myuser"
+        assert data["owner"]["html_url"] == "https://gitlab.com/myuser"
+        assert data["owner"]["avatar_url"] is None
+        # pushed_at should be a valid UTC timestamp
+        from datetime import datetime
+        datetime.strptime(data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
+
+    def test_empty_repo_falls_back_to_current_time(self, tmp_path: Path):
+        """An empty repo (no commits) should fall back to current UTC time."""
+        repo_dir = tmp_path / "empty"
+        repo_dir.mkdir()
+        subprocess.check_call(["git", "init"], cwd=repo_dir)
+
+        data = _build_repo_data_from_clone(
+            "https://gitlab.com/u/empty", "u", "empty", "gitlab.com", repo_dir,
+        )
+
+        from datetime import datetime
+        # Should not raise — the date is valid
+        datetime.strptime(data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
+
+    def test_strips_git_suffix_from_html_url(self, tmp_path: Path):
+        """html_url should strip .git suffix from the original URL."""
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        subprocess.check_call(["git", "init"], cwd=repo_dir)
+
+        data = _build_repo_data_from_clone(
+            "https://example.com/org/repo.git",
+            "org", "repo", "example.com", repo_dir,
+        )
+
+        assert data["html_url"] == "https://example.com/org/repo"
 
 
 # ---------------------------------------------------------------------------
@@ -359,20 +470,23 @@ class TestRepoDownload:
             "full_name": "owner/repo",
             "html_url": "https://github.com/owner/repo",
             "pushed_at": "2026-01-01T00:00:00Z",
+            "_platform": "github.com",
         }
         return resp
 
-    def test_successful_download(self, tmp_path):
+    def test_successful_github_download(self, tmp_path):
+        """GitHub URLs use the API path and inject _platform."""
         mock_resp = self._mock_github_api()
         with patch("iagitup.iagitup.requests.get", return_value=mock_resp), \
-             patch("iagitup.iagitup.git.Git") as mock_git_cls, \
+             patch("iagitup.iagitup.subprocess.check_call") as mock_clone, \
              patch("iagitup.iagitup.tempfile.mkdtemp", return_value=str(tmp_path)):
             (tmp_path / "repo").mkdir()
-            gh_data, repo_folder = repo_download("https://github.com/owner/repo")
+            repo_data, repo_folder = repo_download("https://github.com/owner/repo")
 
-        assert gh_data["full_name"] == "owner/repo"
+        assert repo_data["full_name"] == "owner/repo"
+        assert repo_data["_platform"] == "github.com"
         assert repo_folder == tmp_path / "repo"
-        mock_git_cls().clone.assert_called_once()
+        mock_clone.assert_called_once()
 
     def test_raises_on_github_api_error(self):
         mock_resp = self._mock_github_api(status=404)
@@ -381,18 +495,43 @@ class TestRepoDownload:
                 repo_download("https://github.com/owner/repo")
 
     def test_raises_on_clone_failure(self, tmp_path):
-        import git as gitmodule
-
         mock_resp = self._mock_github_api()
-        mock_git = MagicMock()
-        mock_git.clone.side_effect = gitmodule.GitCommandError("clone", "fail")
         with patch("iagitup.iagitup.requests.get", return_value=mock_resp), \
-             patch("iagitup.iagitup.git.Git", return_value=mock_git), \
+             patch("iagitup.iagitup.subprocess.check_call",
+                   side_effect=subprocess.CalledProcessError(128, "git clone")), \
              patch("iagitup.iagitup.tempfile.mkdtemp", return_value=str(tmp_path)):
             with pytest.raises(RepoDownloadError, match="Failed to clone"):
                 repo_download("https://github.com/owner/repo")
         # Temp dir should be cleaned up on failure
         assert not tmp_path.exists()
+
+    def test_generic_url_skips_github_api(self, tmp_path):
+        """Non-GitHub URLs should NOT call the GitHub API."""
+        mock_repo_data = {
+            "clone_url": "https://gitlab.com/user/proj.git",
+            "full_name": "user/proj",
+            "html_url": "https://gitlab.com/user/proj",
+            "pushed_at": "2026-03-01T12:00:00Z",
+            "description": "",
+            "owner": {
+                "login": "user",
+                "html_url": "https://gitlab.com/user",
+                "avatar_url": None,
+            },
+            "has_wiki": False,
+            "_platform": "gitlab.com",
+        }
+        with patch("iagitup.iagitup.subprocess.check_call"), \
+             patch("iagitup.iagitup.tempfile.mkdtemp", return_value=str(tmp_path)), \
+             patch("iagitup.iagitup._build_repo_data_from_clone", return_value=mock_repo_data), \
+             patch("iagitup.iagitup.requests.get") as mock_requests_get:
+            (tmp_path / "proj").mkdir()
+            repo_data, repo_folder = repo_download("https://gitlab.com/user/proj")
+
+        # No GitHub API call should have been made
+        mock_requests_get.assert_not_called()
+        assert repo_data["_platform"] == "gitlab.com"
+        assert repo_folder == tmp_path / "proj"
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +550,7 @@ class TestUploadIa:
             "avatar_url": "https://avatars.example.com/u/1",
         },
         "has_wiki": False,
+        "_platform": "github.com",
     }
 
     def test_skips_existing_item(self, tmp_path):
@@ -459,6 +599,7 @@ class TestUploadIa:
         assert meta["mediatype"] == "software"
         assert meta["collection"] == "open_source_software"
         assert meta["creator"] == "owner"
+        assert meta["subject"] == "GitHub;code;software;git"
         mock_item.upload.assert_called_once()
 
     def test_custom_meta_overrides_defaults(self, tmp_path):
@@ -511,6 +652,79 @@ class TestUploadIa:
         with patch("iagitup.iagitup.internetarchive.get_session", side_effect=Exception("network")):
             with pytest.raises(UploadError, match="Failed to connect"):
                 upload_ia(repo_folder, self.GH_DATA, s3_access="a", s3_secret="s")
+
+    def test_gitlab_platform_identifier_and_subject(self, tmp_path):
+        """Non-GitHub platform should use platform hostname in identifier and label in subject."""
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        gitlab_data = {
+            "full_name": "user/proj",
+            "html_url": "https://gitlab.com/user/proj",
+            "pushed_at": "2026-03-01T12:00:00Z",
+            "description": "A GitLab project",
+            "owner": {
+                "login": "user",
+                "html_url": "https://gitlab.com/user",
+                "avatar_url": None,
+            },
+            "has_wiki": False,
+            "_platform": "gitlab.com",
+        }
+
+        mock_item = MagicMock()
+        mock_item.exists = False
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        fake_bundle = repo_folder / "bundle.bundle"
+        fake_bundle.write_text("bundle")
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session), \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup.create_bundle", return_value=fake_bundle), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value=""):
+            identifier, meta, stem = upload_ia(
+                repo_folder, gitlab_data, s3_access="a", s3_secret="s",
+            )
+
+        # Identifier should start with gitlab.com
+        assert identifier.startswith("gitlab.com-")
+        # Subject should use the human-readable label
+        assert meta["subject"] == "GitLab;code;software;git"
+
+    def test_no_avatar_download_when_url_is_none(self, tmp_path):
+        """When avatar_url is None, _download_avatar should not be called."""
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        no_avatar_data = {
+            **self.GH_DATA,
+            "owner": {
+                "login": "owner",
+                "html_url": "https://github.com/owner",
+                "avatar_url": None,
+            },
+        }
+
+        mock_item = MagicMock()
+        mock_item.exists = False
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        fake_bundle = repo_folder / "bundle.bundle"
+        fake_bundle.write_text("bundle")
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session), \
+             patch("iagitup.iagitup._download_avatar") as mock_avatar, \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup.create_bundle", return_value=fake_bundle), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value=""):
+            upload_ia(repo_folder, no_avatar_data, s3_access="a", s3_secret="s")
+
+        mock_avatar.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +844,7 @@ class TestUploadIaWithLfs:
             "avatar_url": "https://avatars.example.com/u/1",
         },
         "has_wiki": False,
+        "_platform": "github.com",
     }
 
     def test_lfs_archive_uploaded(self, tmp_path):
@@ -732,14 +947,30 @@ class TestCli:
         from iagitup.__main__ import main
         fake_folder = tmp_path / "tmpXXX" / "repo"
         fake_folder.mkdir(parents=True)
-        gh_data = {"pushed_at": "2026-01-01T00:00:00Z"}
+        repo_data = {"pushed_at": "2026-01-01T00:00:00Z"}
 
         with patch("sys.argv", ["iagitup", "https://github.com/o/r"]), \
              patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")), \
-             patch("iagitup.__main__.repo_download", return_value=(gh_data, fake_folder)), \
+             patch("iagitup.__main__.repo_download", return_value=(repo_data, fake_folder)), \
              patch("iagitup.__main__.upload_ia", return_value=("ia-id", {"title": "ia-id"}, "bundle")):
             main()
 
         out = capsys.readouterr().out
         assert "Upload FINISHED" in out
         assert "ia-id" in out
+
+    def test_successful_run_with_gitlab_url(self, tmp_path, capsys):
+        """CLI should accept non-GitHub URLs."""
+        from iagitup.__main__ import main
+        fake_folder = tmp_path / "tmpXXX" / "proj"
+        fake_folder.mkdir(parents=True)
+        repo_data = {"pushed_at": "2026-03-01T12:00:00Z", "_platform": "gitlab.com"}
+
+        with patch("sys.argv", ["iagitup", "https://gitlab.com/user/proj"]), \
+             patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")), \
+             patch("iagitup.__main__.repo_download", return_value=(repo_data, fake_folder)), \
+             patch("iagitup.__main__.upload_ia", return_value=("gl-id", {"title": "gl-id"}, "bundle")):
+            main()
+
+        out = capsys.readouterr().out
+        assert "Upload FINISHED" in out

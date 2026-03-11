@@ -36,7 +36,8 @@ from iagitup.iagitup import (
 )
 
 PROGRAM_DESCRIPTION = (
-    "Archive a GitHub repository to the Internet Archive. "
+    "Archive a git repository to the Internet Archive. "
+    "Supports GitHub, GitLab, Bitbucket, Codeberg, and any HTTPS git URL. "
     "Downloads the repo, creates a git bundle, and uploads it to archive.org. "
     "Git LFS objects are detected and archived automatically when git-lfs is installed. "
     "https://github.com/gdamdam/iagitup"
@@ -54,7 +55,10 @@ def main() -> None:
         help="Custom metadata as comma-separated key:value pairs (e.g. foo:bar,baz:qux)",
     )
     parser.add_argument("--version", "-v", action="version", version=__version__)
-    parser.add_argument("github_url", type=str, help="GitHub repository URL to archive")
+    parser.add_argument(
+        "repo_url", type=str,
+        help="Git repository URL to archive (GitHub, GitLab, Bitbucket, or any HTTPS git URL)",
+    )
     args = parser.parse_args()
 
     try:
@@ -76,29 +80,30 @@ def main() -> None:
             )
             sys.exit(1)
 
-    print(f":: Downloading {args.github_url} ...")
+    print(f":: Downloading {args.repo_url} ...")
+    repo_folder = None  # track for cleanup in all exit paths
     try:
-        gh_repo_data, repo_folder = repo_download(args.github_url)
-    except IagitupError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
+        repo_data, repo_folder = repo_download(args.repo_url)
 
-    try:
         identifier, meta, bundle_stem = upload_ia(
             repo_folder,
-            gh_repo_data,
+            repo_data,
             s3_access=s3_access,
             s3_secret=s3_secret,
             custom_meta=custom_meta,
         )
+    except KeyboardInterrupt:
+        print("\n:: Interrupted — cleaning up temporary files ...", file=sys.stderr)
+        sys.exit(130)
     except IagitupError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     finally:
-        # Clean the entire mkdtemp root (repo + any wiki/ subdir created by
-        # _download_wiki), not just the repo subfolder.  repo_folder.parent
-        # is the temp dir created by mkdtemp in repo_download().
-        shutil.rmtree(repo_folder.parent, ignore_errors=True)
+        # Always clean the entire mkdtemp root (repo + any wiki/ subdir),
+        # regardless of success, failure, or Ctrl+C.  This prevents cloned
+        # repos from accumulating in /tmp and filling the user's disk.
+        if repo_folder is not None:
+            shutil.rmtree(repo_folder.parent, ignore_errors=True)
 
     # Print a human-friendly summary with direct links to the archived item.
     print("\n:: Upload FINISHED.")
