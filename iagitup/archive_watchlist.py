@@ -3,7 +3,7 @@
 
 Designed to be run as a single-shot script (e.g. via cron). On each run it:
   1. Fetches the top-N repos from the GitHub Search API (sorted by stars,
-     optionally filtered to repos created within the last --days days).
+     optionally filtered by --days, --since, or --until).
   2. Compares each repo's pushed_at timestamp against a local state cache.
   3. Skips repos that haven't changed since the last run.
   4. Archives new or updated repos using iagitup, injecting rich popularity metadata.
@@ -14,11 +14,12 @@ Repos are archived in parallel using a configurable worker pool (--workers).
 Usage:
     python archive_watchlist.py                  # archive top 100 (all-time), 4 workers
     python archive_watchlist.py --top-n 10       # quick test
-    python archive_watchlist.py --days 7         # top repos created in the last week
-    python archive_watchlist.py --days 30        # top repos created in the last month
+    python archive_watchlist.py --days 7                            # last week
+    python archive_watchlist.py --days 30                           # last month
     python archive_watchlist.py --since 2025-01-01 --until 2025-06-30  # date range
-    python archive_watchlist.py --since 2025-01-01  # everything since a date
-    python archive_watchlist.py --workers 8      # more parallelism
+    python archive_watchlist.py --since 2025-01-01                  # since a date
+    python archive_watchlist.py --until 2025-12-31                  # up to a date
+    python archive_watchlist.py --workers 8                         # more parallelism
     python archive_watchlist.py --dry-run        # preview without uploading
     python archive_watchlist.py --state-file /path/to/state.json
 
