@@ -15,6 +15,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+"""CLI entry point for ``python -m iagitup`` and the ``iagitup`` console script.
+
+Orchestrates the three-step workflow: validate credentials, download the repo,
+and upload the archive to the Internet Archive. Temporary files are always
+cleaned up, even when the upload fails.
+"""
+
 import argparse
 import logging
 import shutil
@@ -55,6 +62,8 @@ def main() -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    # Parse the free-form metadata string into a dict.  Using split(":", 1)
+    # allows values to contain colons (e.g. "url:https://example.com").
     custom_meta: dict | None = None
     if args.metadata is not None:
         try:
@@ -86,9 +95,11 @@ def main() -> None:
         sys.exit(1)
     finally:
         # Clean the entire mkdtemp root (repo + any wiki/ subdir created by
-        # _download_wiki), not just the repo subfolder.
+        # _download_wiki), not just the repo subfolder.  repo_folder.parent
+        # is the temp dir created by mkdtemp in repo_download().
         shutil.rmtree(repo_folder.parent, ignore_errors=True)
 
+    # Print a human-friendly summary with direct links to the archived item.
     print("\n:: Upload FINISHED.")
     print(f"   Identifier:          {meta['title']}")
     print(f"   Archived repository: https://archive.org/details/{identifier}")

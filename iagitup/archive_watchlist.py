@@ -43,6 +43,8 @@ from iagitup.iagitup import (
 
 log = logging.getLogger(__name__)
 
+# Relative path; resolves to cwd so the state file lives alongside the script
+# when launched from the project root (typical cron setup).
 DEFAULT_STATE_FILE = Path("watchlist_state.json")
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
 
@@ -106,8 +108,12 @@ def fetch_top_repos(n: int) -> list[dict]:
     Raises:
         SystemExit: If the API returns a non-200 status code.
     """
+    # GitHub Search API returns at most 100 results per page; we don't
+    # paginate because the top-100-by-stars use case rarely needs more.
     per_page = min(n, 100)
     params = {
+        # "stars:>1" is a minimal filter that effectively means "all repos
+        # with at least 2 stars", combined with sort=stars to get the top ones.
         "q": "stars:>1",
         "sort": "stars",
         "order": "desc",
@@ -120,8 +126,8 @@ def fetch_top_repos(n: int) -> list[dict]:
         timeout=30,
     )
 
-    # Check status before reading rate-limit headers so we don't silently
-    # default to a misleading 9999 on error responses.
+    # Check status before reading rate-limit headers: on error responses
+    # these headers may be absent, and the fallback 9999 would be misleading.
     if resp.status_code != 200:
         log.error(f"GitHub API error {resp.status_code}: {resp.text[:200]}")
         sys.exit(1)
@@ -155,11 +161,12 @@ def build_custom_meta(repo_data: dict, rank: int) -> dict:
     Returns:
         Dict of additional IA metadata fields.
     """
+    # GitHub returns None (not missing key) when no topics/language are set.
     topics = repo_data.get("topics") or []
     language = repo_data.get("language") or ""
 
-    # Extend the default iagitup subject with the primary language and topics
-    # so the IA item is more discoverable.
+    # Extend the default iagitup subject tags with the primary language and
+    # user-defined topics so the IA item is more discoverable in search.
     subject_parts = ["GitHub", "code", "software", "git"]
     if language:
         subject_parts.append(language)
@@ -297,7 +304,8 @@ def main() -> None:
     if args.dry_run:
         log.info("DRY-RUN mode — nothing will be uploaded.")
 
-    # Credentials are not needed in dry-run mode.
+    # Credentials are not needed in dry-run mode; skip the interactive
+    # prompt that get_ia_credentials() might trigger if no config exists.
     s3_access = s3_secret = ""
     if not args.dry_run:
         try:
@@ -310,8 +318,10 @@ def main() -> None:
     repos = fetch_top_repos(args.top_n)
 
     counts: dict[str, int] = {"archived": 0, "skipped": 0, "failed": 0}
-    # Lock guards concurrent writes to the state file; the state dict itself
-    # is safe without a lock because each thread operates on a unique key.
+    # save_lock guards concurrent writes to the state file on disk.
+    # The in-memory state dict doesn't need a lock because each thread
+    # writes to a unique key (the repo's full_name).
+    # counts_lock guards the shared counters dict.
     save_lock = threading.Lock()
     counts_lock = threading.Lock()
 
@@ -333,6 +343,8 @@ def main() -> None:
             executor.submit(run, rank, repo_data): repo_data["full_name"]
             for rank, repo_data in enumerate(repos, start=1)
         }
+        # as_completed yields futures in the order they finish, not submission
+        # order -- this lets us log results as soon as they're available.
         for future in as_completed(futures):
             name = futures[future]
             try:

@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""iagitup - Core logic for archiving GitHub repositories to the Internet Archive."""
+"""iagitup - Core logic for archiving GitHub repositories to the Internet Archive.
+
+This module handles the full archival pipeline:
+  1. Parsing and validating GitHub URLs
+  2. Fetching repository metadata from the GitHub API
+  3. Cloning repos (and optional wikis) to temporary directories
+  4. Creating ``git bundle`` snapshots (single-file, fully portable archives)
+  5. Uploading bundles + metadata to the Internet Archive via the S3-like API
+  6. Reading IA credentials from the ``ia`` CLI config files
+
+All public functions raise subclasses of ``IagitupError`` on failure so that
+callers can handle errors uniformly.
+"""
 
 __author__ = "Giovanni Damiola"
 __copyright__ = "Copyright 2018-2026, Giovanni Damiola"
@@ -69,6 +81,7 @@ def _parse_github_url(url: str) -> tuple[str, str]:
         RepoDownloadError: If the URL path does not contain both owner and repo.
     """
     parsed = urlparse(url.rstrip("/"))
+    # Filter empty strings that arise from leading/trailing/double slashes.
     parts = [p for p in parsed.path.strip("/").split("/") if p]
     if len(parts) < 2:
         raise RepoDownloadError(f"Invalid GitHub URL: {url}")
@@ -86,6 +99,8 @@ def _github_headers() -> dict[str, str]:
     Returns:
         Dict of HTTP headers.
     """
+    # Request the v3 JSON format explicitly; without this header GitHub may
+    # return different representations for some endpoints.
     headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
     token = os.environ.get("GITHUB_TOKEN")
     if token:
@@ -155,6 +170,7 @@ def _download_avatar(avatar_url: str, dest_path: Path) -> Path | None:
     try:
         pic = requests.get(avatar_url, stream=True, timeout=30)
         pic.raise_for_status()
+        # Let urllib3 handle Content-Encoding decompression transparently.
         pic.raw.decode_content = True
         with dest_path.open("wb") as fh:
             shutil.copyfileobj(pic.raw, fh)
@@ -184,7 +200,11 @@ def _download_wiki(gh_repo_data: dict, dest_dir: Path) -> Path | None:
     wiki_url = gh_repo_data["html_url"] + ".wiki.git"
     wiki_folder = dest_dir / "wiki"
     try:
-        git.Git().clone(wiki_url, str(wiki_folder))
+        g = git.Git()
+        # Disable interactive credential prompts so the clone fails fast
+        # instead of hanging when the wiki requires authentication.
+        g.update_environment(GIT_TERMINAL_PROMPT="0")
+        g.clone(wiki_url, str(wiki_folder))
         log.info("Wiki cloned successfully.")
         return wiki_folder
     except git.GitCommandError:
@@ -209,9 +229,13 @@ def get_description_from_readme(repo_folder: Path) -> str:
     Returns:
         HTML string with newlines stripped, or empty string.
     """
+    # Try the three most common casing conventions; a case-insensitive glob
+    # would be cleaner but may behave unexpectedly on case-sensitive filesystems.
     for name in ("README.md", "readme.md", "Readme.md"):
         readme = repo_folder / name
         if readme.exists():
+            # Strip newlines so the HTML can be safely embedded in IA metadata
+            # (which is a single-line XML value).
             return markdown_path(str(readme)).replace("\n", "")
 
     txt = repo_folder / "readme.txt"
@@ -246,6 +270,8 @@ def create_bundle(repo_folder: Path, bundle_name: str) -> Path:
 
     bundle_path = repo_folder / f"{bundle_name}.bundle"
     try:
+        # --all bundles every ref (branches, tags, etc.) into a single file
+        # that can later be cloned with ``git clone <file>.bundle``.
         subprocess.check_call(
             ["git", "bundle", "create", bundle_path.name, "--all"],
             cwd=repo_folder,
@@ -299,17 +325,22 @@ def upload_ia(
         UploadError: If bundle creation or any IA upload fails.
     """
     # --- Derive names and timestamps from the GitHub push date ---
+    # Using pushed_at (not created_at) ensures a new IA item is created
+    # whenever the repo receives new commits, while unchanged repos reuse
+    # the same identifier and are de-duplicated via the early-exit below.
     pushed = datetime.strptime(gh_repo_data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
-    pushed_date = pushed.strftime("%Y-%m-%d_%H-%M-%S")
-    raw_pushed_date = pushed.strftime("%Y-%m-%d %H:%M:%S")
+    pushed_date = pushed.strftime("%Y-%m-%d_%H-%M-%S")     # for filenames / identifiers (no spaces)
+    raw_pushed_date = pushed.strftime("%Y-%m-%d %H:%M:%S")  # human-readable, stored in IA metadata
     date = pushed.strftime("%Y-%m-%d")
     year = pushed.year
 
+    # "owner/repo" -> "owner-repo" because IA identifiers cannot contain slashes.
     repo_name = gh_repo_data["full_name"].replace("/", "-")
     original_url = gh_repo_data["html_url"]
-    # bundle_stem is used both as the IA item identifier suffix and as the
-    # filename stem for the .bundle file.
+    # bundle_stem doubles as the IA item identifier suffix and the .bundle
+    # filename, keeping both in sync for predictable download URLs.
     bundle_stem = f"{repo_name}_-_{pushed_date}"
+    # IA identifier format: "github.com-owner-repo_-_YYYY-MM-DD_HH-MM-SS"
     itemname = f"github.com-{repo_name}_-_{pushed_date}"
 
     owner_url = gh_repo_data["owner"]["html_url"]
@@ -390,7 +421,7 @@ def upload_ia(
         creator=owner_name,
         collection="open_source_software",
         title=itemname,
-        year=year,
+        year=str(year),
         date=date,
         subject="GitHub;code;software;git",
         uploaded_with=uploader_tag,
@@ -410,6 +441,11 @@ def upload_ia(
     # --- Upload all files to the IA item sequentially ---
     try:
         log.info(f"Uploading bundle: {bundle_file.name}")
+        # retries and timeout are set deliberately high because IA uploads
+        # can be slow and flaky; 9001 is effectively "keep trying".
+        # delete=False keeps the local file so the caller can clean up the
+        # entire temp dir at once; cover and wiki use delete=True since they
+        # are auxiliary files we don't need to keep around.
         item.upload(
             str(bundle_file),
             metadata=meta,
@@ -458,7 +494,10 @@ def get_ia_credentials() -> tuple[str, str]:
     Raises:
         CredentialsError: If credentials cannot be found or the config is malformed.
     """
+    # The ``ia`` CLI has changed its default config location over time.
+    # Check all known paths in order of preference (newest convention first).
     candidates = [
+        Path("~/.config/internetarchive/ia.ini").expanduser(),
         Path("~/.ia").expanduser(),
         Path("~/.config/ia.ini").expanduser(),
     ]
