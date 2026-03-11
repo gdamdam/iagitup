@@ -3,6 +3,7 @@
 <p align="center">
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>
+  <a href="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml"><img src="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/pypi/l/iagitup?style=flat&cache_seconds=0" alt="License: GPLv3"></a>
 </p>
 
@@ -289,7 +290,7 @@ All branches and tags are preserved in the bundle.
 
 Contributions are welcome. Please open an issue or submit a pull request at <https://github.com/gdamdam/iagitup>.
 
-The project uses GitLab CI for automated linting and testing across Python 3.10, 3.11, 3.12, and 3.13.
+The project uses GitHub Actions and GitLab CI for automated testing across Python 3.10, 3.11, 3.12, and 3.13.
 
 ---
 
