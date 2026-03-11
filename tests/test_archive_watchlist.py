@@ -281,3 +281,35 @@ class TestArchiveRepo:
         assert meta["github_rank"] == "3"
         assert meta["stars_count"] == "50000"
         assert meta["language"] == "Python"
+
+
+# ---------------------------------------------------------------------------
+# CLI (main)
+# ---------------------------------------------------------------------------
+
+class TestWatchlistCli:
+    def test_version_flag(self, capsys):
+        from iagitup.archive_watchlist import main
+        from iagitup.iagitup import __version__
+        with pytest.raises(SystemExit, match="0"):
+            with patch("sys.argv", ["archive-watchlist", "--version"]):
+                main()
+        assert __version__ in capsys.readouterr().out
+
+    def test_top_n_exceeds_100_exits(self):
+        from iagitup.archive_watchlist import main
+        with pytest.raises(SystemExit, match="2"):
+            with patch("sys.argv", ["archive-watchlist", "--top-n", "200"]):
+                main()
+
+    def test_dry_run_skips_credentials(self):
+        from iagitup.archive_watchlist import main
+        with patch("sys.argv", ["archive-watchlist", "--dry-run", "--top-n", "1"]), \
+             patch("iagitup.archive_watchlist.fetch_top_repos", return_value=[SAMPLE_REPO]), \
+             patch("iagitup.archive_watchlist.load_state", return_value={}), \
+             patch("iagitup.archive_watchlist.save_state"), \
+             patch("iagitup.archive_watchlist.archive_repo", return_value="archived"):
+            # Should not call get_ia_credentials in dry-run mode
+            with patch("iagitup.archive_watchlist.get_ia_credentials") as mock_creds:
+                main()
+            mock_creds.assert_not_called()

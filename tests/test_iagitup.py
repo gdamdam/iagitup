@@ -12,6 +12,8 @@ from iagitup.iagitup import (
     BundleError,
     CredentialsError,
     RepoDownloadError,
+    UploadError,
+    __version__,
     _download_avatar,
     _download_wiki,
     _github_headers,
@@ -19,6 +21,8 @@ from iagitup.iagitup import (
     create_bundle,
     get_description_from_readme,
     get_ia_credentials,
+    repo_download,
+    upload_ia,
 )
 
 
@@ -336,3 +340,258 @@ class TestDownloadAvatar:
             result = _download_avatar("https://avatars.example.com/u/123", dest)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# repo_download
+# ---------------------------------------------------------------------------
+
+class TestRepoDownload:
+    def _mock_github_api(self, status=200):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.json.return_value = {
+            "clone_url": "https://github.com/owner/repo.git",
+            "full_name": "owner/repo",
+            "html_url": "https://github.com/owner/repo",
+            "pushed_at": "2026-01-01T00:00:00Z",
+        }
+        return resp
+
+    def test_successful_download(self, tmp_path):
+        mock_resp = self._mock_github_api()
+        with patch("iagitup.iagitup.requests.get", return_value=mock_resp), \
+             patch("iagitup.iagitup.git.Git") as mock_git_cls, \
+             patch("iagitup.iagitup.tempfile.mkdtemp", return_value=str(tmp_path)):
+            (tmp_path / "repo").mkdir()
+            gh_data, repo_folder = repo_download("https://github.com/owner/repo")
+
+        assert gh_data["full_name"] == "owner/repo"
+        assert repo_folder == tmp_path / "repo"
+        mock_git_cls().clone.assert_called_once()
+
+    def test_raises_on_github_api_error(self):
+        mock_resp = self._mock_github_api(status=404)
+        with patch("iagitup.iagitup.requests.get", return_value=mock_resp):
+            with pytest.raises(RepoDownloadError, match="404"):
+                repo_download("https://github.com/owner/repo")
+
+    def test_raises_on_clone_failure(self, tmp_path):
+        import git as gitmodule
+
+        mock_resp = self._mock_github_api()
+        mock_git = MagicMock()
+        mock_git.clone.side_effect = gitmodule.GitCommandError("clone", "fail")
+        with patch("iagitup.iagitup.requests.get", return_value=mock_resp), \
+             patch("iagitup.iagitup.git.Git", return_value=mock_git), \
+             patch("iagitup.iagitup.tempfile.mkdtemp", return_value=str(tmp_path)):
+            with pytest.raises(RepoDownloadError, match="Failed to clone"):
+                repo_download("https://github.com/owner/repo")
+        # Temp dir should be cleaned up on failure
+        assert not tmp_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# upload_ia
+# ---------------------------------------------------------------------------
+
+class TestUploadIa:
+    GH_DATA = {
+        "full_name": "owner/repo",
+        "html_url": "https://github.com/owner/repo",
+        "pushed_at": "2026-01-15T10:30:00Z",
+        "description": "A test repo",
+        "owner": {
+            "login": "owner",
+            "html_url": "https://github.com/owner",
+            "avatar_url": "https://avatars.example.com/u/1",
+        },
+        "has_wiki": False,
+    }
+
+    def test_skips_existing_item(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        mock_item = MagicMock()
+        mock_item.exists = True
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session):
+            identifier, meta, stem = upload_ia(
+                repo_folder, self.GH_DATA, s3_access="a", s3_secret="s",
+            )
+
+        assert "owner-repo" in identifier
+        assert "2026-01-15" in identifier
+        # No upload should have been called
+        mock_item.upload.assert_not_called()
+
+    def test_successful_upload(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+        # create_bundle needs a git repo, so we mock it
+        mock_item = MagicMock()
+        mock_item.exists = False
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        fake_bundle = repo_folder / "owner-repo_-_2026-01-15_10-30-00.bundle"
+        fake_bundle.write_text("bundle")
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session), \
+             patch("iagitup.iagitup._download_avatar", return_value=None), \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup.create_bundle", return_value=fake_bundle), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value="readme"):
+            identifier, meta, stem = upload_ia(
+                repo_folder, self.GH_DATA, s3_access="a", s3_secret="s",
+            )
+
+        assert identifier == "github.com-owner-repo_-_2026-01-15_10-30-00"
+        assert meta["mediatype"] == "software"
+        assert meta["collection"] == "open_source_software"
+        assert meta["creator"] == "owner"
+        mock_item.upload.assert_called_once()
+
+    def test_custom_meta_overrides_defaults(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        mock_item = MagicMock()
+        mock_item.exists = False
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        fake_bundle = repo_folder / "bundle.bundle"
+        fake_bundle.write_text("bundle")
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session), \
+             patch("iagitup.iagitup._download_avatar", return_value=None), \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup.create_bundle", return_value=fake_bundle), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value=""):
+            _, meta, _ = upload_ia(
+                repo_folder, self.GH_DATA, s3_access="a", s3_secret="s",
+                custom_meta={"subject": "custom_subject"},
+            )
+
+        assert meta["subject"] == "custom_subject"
+
+    def test_raises_on_bundle_failure(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        mock_item = MagicMock()
+        mock_item.exists = False
+
+        mock_session = MagicMock()
+        mock_session.get_item.return_value = mock_item
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=mock_session), \
+             patch("iagitup.iagitup._download_avatar", return_value=None), \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup.create_bundle", side_effect=BundleError("fail")), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value=""):
+            with pytest.raises(UploadError, match="Bundle creation failed"):
+                upload_ia(repo_folder, self.GH_DATA, s3_access="a", s3_secret="s")
+
+    def test_raises_on_ia_connection_failure(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+
+        with patch("iagitup.iagitup.internetarchive.get_session", side_effect=Exception("network")):
+            with pytest.raises(UploadError, match="Failed to connect"):
+                upload_ia(repo_folder, self.GH_DATA, s3_access="a", s3_secret="s")
+
+
+# ---------------------------------------------------------------------------
+# get_ia_credentials — interactive prompt path
+# ---------------------------------------------------------------------------
+
+class TestGetIaCredentialsPrompt:
+    def test_prompts_ia_configure_when_no_config(self, tmp_path):
+        """When no config file exists, get_ia_credentials runs 'ia configure'."""
+        fake_candidates = [tmp_path / "nope1", tmp_path / "nope2", tmp_path / "nope3"]
+
+        with patch("iagitup.iagitup.Path") as mock_path_cls:
+            instances = []
+            for c in fake_candidates:
+                m = MagicMock()
+                m.expanduser.return_value = c
+                instances.append(m)
+            mock_path_cls.side_effect = instances
+
+            with patch("iagitup.iagitup.subprocess.call", return_value=1):
+                with pytest.raises(CredentialsError, match="did not complete"):
+                    get_ia_credentials()
+
+    def test_raises_when_ia_command_not_found(self, tmp_path):
+        fake_candidates = [tmp_path / "nope1", tmp_path / "nope2", tmp_path / "nope3"]
+
+        with patch("iagitup.iagitup.Path") as mock_path_cls:
+            instances = []
+            for c in fake_candidates:
+                m = MagicMock()
+                m.expanduser.return_value = c
+                instances.append(m)
+            mock_path_cls.side_effect = instances
+
+            with patch("iagitup.iagitup.subprocess.call", side_effect=FileNotFoundError):
+                with pytest.raises(CredentialsError, match="Could not find"):
+                    get_ia_credentials()
+
+
+# ---------------------------------------------------------------------------
+# CLI (__main__.py)
+# ---------------------------------------------------------------------------
+
+class TestCli:
+    def test_version_flag(self, capsys):
+        from iagitup.__main__ import main
+        with pytest.raises(SystemExit, match="0"):
+            with patch("sys.argv", ["iagitup", "--version"]):
+                main()
+        assert __version__ in capsys.readouterr().out
+
+    def test_missing_url_exits(self):
+        from iagitup.__main__ import main
+        with pytest.raises(SystemExit, match="2"):
+            with patch("sys.argv", ["iagitup"]):
+                main()
+
+    def test_invalid_metadata_exits(self, capsys):
+        from iagitup.__main__ import main
+        with patch("sys.argv", ["iagitup", "--metadata=badformat", "https://github.com/o/r"]), \
+             patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")):
+            with pytest.raises(SystemExit, match="1"):
+                main()
+        assert "metadata" in capsys.readouterr().err.lower()
+
+    def test_credential_error_exits(self, capsys):
+        from iagitup.__main__ import main
+        with patch("sys.argv", ["iagitup", "https://github.com/o/r"]), \
+             patch("iagitup.__main__.get_ia_credentials", side_effect=CredentialsError("no creds")):
+            with pytest.raises(SystemExit, match="1"):
+                main()
+        assert "no creds" in capsys.readouterr().err
+
+    def test_successful_run(self, tmp_path, capsys):
+        from iagitup.__main__ import main
+        fake_folder = tmp_path / "tmpXXX" / "repo"
+        fake_folder.mkdir(parents=True)
+        gh_data = {"pushed_at": "2026-01-01T00:00:00Z"}
+
+        with patch("sys.argv", ["iagitup", "https://github.com/o/r"]), \
+             patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")), \
+             patch("iagitup.__main__.repo_download", return_value=(gh_data, fake_folder)), \
+             patch("iagitup.__main__.upload_ia", return_value=("ia-id", {"title": "ia-id"}, "bundle")):
+            main()
+
+        out = capsys.readouterr().out
+        assert "Upload FINISHED" in out
+        assert "ia-id" in out
