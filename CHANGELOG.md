@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.0] - 2026-10-20
+
+### Added
+
+- **`archive-watchlist` pagination** -- `--top` now accepts up to 1000 (10 pages of 100). Pages are paced at 2 s without `GITHUB_TOKEN` to respect the Search API secondary limit; when the rate limit is exhausted the run continues with what was fetched and logs the reset time.
+- **`archive-watchlist --json-summary PATH`** -- machine-readable run summary (`started_at`, `finished_at`, `archived`, `skipped`, `failed`, `total_checked`, `dry_run`, `failures[{repo,error}]`) for cron monitoring.
+- **`archive-watchlist --max-failures N`** -- exit code 2 when more than N repos fail.
+- **`--keep-work-dir`** (both commands) and **`iagitup --resume PATH`** -- keep the clone on disk and resume an interrupted upload from it instead of re-cloning multi-gigabyte repos. `--resume` implies `--keep-work-dir`.
+- **`iagitup --dry-run`** -- print the identifier, bundle URL and metadata as JSON without uploading. GitHub URLs are previewed without cloning; other hosts are cloned (the push date is only known from the clone) but nothing is uploaded. No IA credentials needed.
+- **Rich metadata for GitLab, Codeberg and Gitea/Forgejo** (new `iagitup/platforms.py`) -- description, avatar, wiki, star/fork counts and `pushed_at` now come from the platform API, including self-hosted instances (probed Gitea then GitLab). `GITLAB_TOKEN` is honoured. IA items get `stars_count` / `forks_count` for every platform that reports them.
+- **`iagitup --releases` / `--issues`** (GitHub only, new `iagitup/github_extras.py`) -- upload `releases/releases.json` plus every release asset under `releases/<tag>/`, and `issues.json` / `pulls.json` with comments attached. Asset names are sanitised; `max_asset_mb` is available on the API.
+- **`iagitup --submodules`** -- clone with `--recurse-submodules` and upload one verified bundle per submodule under `submodules/`, plus a copy of `.gitmodules`, so the archive is restorable.
+- **Bundle verification** -- `git bundle verify` runs on every bundle before upload (`verify_bundle`); corruption raises `BundleError` instead of reaching IA.
+- `upload_ia(extra_files=..., dry_run=...)` and `repo_download(submodules=...)` parameters; `create_submodule_bundles()`.
+
+### Changed
+
+- `archive_repo()` accepts optional `failures`, `failures_lock` and `keep_work_dir` arguments (all default to the previous behaviour).
+
 ## [3.6.3] - 2026-10-20
 
 ### Fixed

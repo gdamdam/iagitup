@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iagitup"
-version = "3.6.3"
+version = "3.7.0"
 description = "Archive git repositories to the Internet Archive."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { text = "GPL-3.0-or-later" }
@@ -44,3 +44,7 @@ include = ["iagitup*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.ruff]
+# Keep agent worktrees and scratch imports out of local lint runs.
+extend-exclude = [".claude", "to_import"]
