@@ -4,6 +4,7 @@
   <img src="https://img.shields.io/badge/version-3.7.0-blue?style=flat" alt="Version 3.7.0">
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>
+  <a href="https://pepy.tech/projects/iagitup"><img src="https://img.shields.io/pypi/dm/iagitup?style=flat" alt="Downloads"></a>
   <a href="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml"><img src="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/pypi/l/iagitup?style=flat&cache_seconds=0" alt="License: GPLv3"></a>
 </p>

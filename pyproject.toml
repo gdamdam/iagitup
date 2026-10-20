@@ -31,9 +31,12 @@ dependencies = [
 ]
 
 [project.urls]
+# PEP 753 well-known labels; PyPI shows the "GitHub Statistics" box for a
+# github.com owner/repo URL and renders these with dedicated icons.
 Homepage = "https://github.com/gdamdam/iagitup"
-Repository = "https://github.com/gdamdam/iagitup"
-"Bug Tracker" = "https://github.com/gdamdam/iagitup/issues"
+Source = "https://github.com/gdamdam/iagitup"
+Issues = "https://github.com/gdamdam/iagitup/issues"
+Changelog = "https://github.com/gdamdam/iagitup/blob/main/CHANGELOG.md"
 
 [project.scripts]
 iagitup = "iagitup.__main__:main"
