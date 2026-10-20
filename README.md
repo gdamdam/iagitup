@@ -156,7 +156,7 @@ archive-watchlist [options]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--top N` | `100` | Number of top repositories to fetch and check (max 100) |
+| `--top N` | `100` | Number of top repositories to fetch and check (max 1000; fetched 100 per page, paced at 2s per page without `GITHUB_TOKEN`) |
 | `--days N` | *(all-time)* | Only consider repos created within the last N days |
 | `--since DATE` | -- | Only consider repos created on or after DATE (YYYY-MM-DD) |
 | `--until DATE` | -- | Only consider repos created on or before DATE (YYYY-MM-DD) |
@@ -165,6 +165,9 @@ archive-watchlist [options]
 | `--workers N` | `4` | Number of parallel archive workers |
 | `--dry-run` | off | Preview what would be archived -- no uploads, no state changes |
 | `--state-file PATH` | `./watchlist_state.json` | Path to the persistent state cache |
+| `--json-summary PATH` | -- | Write a JSON run summary (`started_at`, `finished_at`, `archived`, `skipped`, `failed`, `total_checked`, `dry_run`, `failures`) to PATH |
+| `--max-failures N` | *(no threshold)* | Exit with code 2 if more than N repos fail |
+| `--keep-work-dir` | off | Keep temporary clone directories (path is logged) so a run can be resumed with `iagitup --resume` |
 | `--version` / `-v` | -- | Print version and exit |
 
 Examples:
@@ -181,6 +184,12 @@ archive-watchlist --since 2025-01-01 --until 2025-12-31 --state-file /var/lib/ia
 
 # Combine with top-n for a quick daily trending sweep
 archive-watchlist --days 1 --top 20 --dry-run
+
+# Go deep: top 500 repos (paginated), with a cron-friendly summary and failure threshold
+archive-watchlist --top 500 --json-summary /var/log/iagitup/summary.json --max-failures 5
+
+# Keep temp clones of failed/finished repos for debugging or --resume
+archive-watchlist --keep-work-dir
 ```
 
 ---
