@@ -11,7 +11,7 @@
 
 **Archive git repositories to the [Internet Archive](https://archive.org).**
 
-`iagitup` clones a git repository from GitHub, GitLab, Bitbucket, Codeberg, or any HTTPS git URL, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the Internet Archive with rich metadata. GitHub repos get full API metadata; all other platforms extract metadata from the local git history. If the repository has a wiki (GitHub only), that is bundled and uploaded too. A companion command, `archive-watchlist`, continuously archives the most-starred repositories on GitHub -- either all-time, by recency (`--days`), or within a custom date range (`--since`/`--until`).
+`iagitup` clones a git repository from GitHub, GitLab, Bitbucket, Codeberg, or any HTTPS git URL, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the Internet Archive with rich metadata. GitHub, GitLab, Codeberg, and Gitea/Forgejo repos get full API metadata (description, avatar, wiki, star/fork counts); other hosts (e.g. Bitbucket) extract metadata from the local git history. If the repository has a wiki (GitHub, GitLab, Gitea/Forgejo), that is bundled and uploaded too. A companion command, `archive-watchlist`, continuously archives the most-starred repositories on GitHub -- either all-time, by recency (`--days`), or within a custom date range (`--since`/`--until`).
 
 ---
 
@@ -20,8 +20,8 @@
 - **Multi-platform support** -- GitHub, GitLab, Bitbucket, Codeberg, self-hosted Gitea/Forgejo, and any HTTPS git URL.
 - **Full-fidelity snapshots** -- every branch, tag, and ref is preserved in a single git bundle.
 - **Git LFS support** -- LFS-enabled repos are detected automatically; large file objects are fetched and archived alongside the bundle.
-- **Wiki archiving** -- wiki repositories are detected and bundled automatically (GitHub only).
-- **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item. GitHub repos get full API metadata; other platforms extract metadata from git history.
+- **Wiki archiving** -- wiki repositories are detected and bundled automatically (GitHub, GitLab, Codeberg, Gitea/Forgejo).
+- **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item. GitHub, GitLab, Codeberg, and self-hosted Gitea/Forgejo/GitLab get description, avatar, wiki, and star/fork counts via their APIs; other platforms extract metadata from git history. Set `GITLAB_TOKEN` to authenticate GitLab API calls (private projects, rate limits).
 - **Duplicate prevention** -- two layers (local state cache + IA item check) ensure the same snapshot is never uploaded twice.
 - **Bulk archiving** -- `archive-watchlist` fetches and archives the top-N most-starred GitHub repos on a schedule, with `--days`, `--since`, `--until`, and `--max-size` filters for trending repos.
 - **Parallel workers** -- configurable concurrency for bulk runs.
@@ -247,10 +247,10 @@ Custom fields are **merged** into the default metadata. Any key that matches a d
 
 ### Single repository (`iagitup`)
 
-1. **Fetches metadata** -- for GitHub repos, from the GitHub API (`pushed_at`, description, owner, etc.); for all other platforms, from the local git history after cloning.
+1. **Fetches metadata** -- for GitHub repos, from the GitHub API (`pushed_at`, description, owner, etc.); for GitLab and Gitea/Forgejo/Codeberg (including self-hosted), from their APIs; for any other host, or if the API is unreachable, from the local git history after cloning.
 2. **Checks for duplicates** -- the IA item identifier is derived from the platform hostname, repo name, and `pushed_at` timestamp (`{platform}-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}`). If an item with that identifier already exists, iagitup exits early.
 3. **Clones the repository** in full (all branches and tags).
-4. **Downloads the owner's avatar** as a cover image (`cover.jpg`), concurrently with wiki cloning (GitHub only; skipped for other platforms).
+4. **Downloads the owner's avatar** as a cover image (`cover.jpg`), concurrently with wiki cloning (skipped when the platform API provides no avatar).
 5. **Creates git bundles** (`git bundle create --all`) for the repository and, if present, the wiki.
 6. **Builds an HTML description** from the repo description, README (`.md` or `.txt`), and restore instructions.
 7. **Uploads** the bundle(s) and cover image to the Internet Archive.
