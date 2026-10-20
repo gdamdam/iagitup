@@ -2,12 +2,12 @@
 
 import json
 import logging
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from iagitup.archive_watchlist import (
+    _state_lock,
     archive_repo,
     build_custom_meta,
     fetch_top_repos,
@@ -233,7 +233,8 @@ class TestArchiveRepo:
         fake_folder.mkdir()
         state = {}
 
-        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
              patch("iagitup.archive_watchlist.upload_ia", return_value=("ia-id-123", {}, "bundle")):
             result = archive_repo(SAMPLE_REPO, 1, "acc", "sec", state, dry_run=False)
 
@@ -251,7 +252,8 @@ class TestArchiveRepo:
         fake_folder.mkdir()
         state = {}
 
-        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
              patch("iagitup.archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
             result = archive_repo(SAMPLE_REPO, 1, "acc", "sec", state, dry_run=False)
 
@@ -266,7 +268,8 @@ class TestArchiveRepo:
         fake_folder.mkdir()
         (fake_folder / "bundle.bundle").write_text("data")
 
-        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
              patch("iagitup.archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
             archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False)
 
@@ -281,7 +284,8 @@ class TestArchiveRepo:
         fake_folder = download_dir / "repo"
         fake_folder.mkdir()
 
-        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
              patch("iagitup.archive_watchlist.upload_ia", return_value=("ia-id", {}, "bundle")):
             archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False)
 
@@ -293,7 +297,8 @@ class TestArchiveRepo:
         fake_folder = download_dir / "repo"
         fake_folder.mkdir()
 
-        with patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
              patch("iagitup.archive_watchlist.upload_ia", return_value=("ia-id", {}, "b")) as mock_upload:
             archive_repo(SAMPLE_REPO, 3, "acc", "sec", {}, dry_run=False)
 
@@ -366,3 +371,76 @@ class TestWatchlistCli:
             with patch("iagitup.archive_watchlist.get_ia_credentials") as mock_creds:
                 main()
             mock_creds.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Pre-clone duplicate check + state locking (3.6.3)
+# ---------------------------------------------------------------------------
+
+class TestArchiveRepoExistingItem:
+    def test_existing_item_skips_clone_and_records_state(self):
+        state = {}
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=("ia-id", "stem")), \
+             patch("iagitup.archive_watchlist.repo_download") as mock_download, \
+             patch("iagitup.archive_watchlist.upload_ia") as mock_upload:
+            result = archive_repo(SAMPLE_REPO, 1, "acc", "sec", state, dry_run=False)
+
+        assert result == "archived"
+        mock_download.assert_not_called()
+        mock_upload.assert_not_called()
+        assert state["owner/repo"]["ia_identifier"] == "ia-id"
+
+    def test_search_metadata_is_passed_to_repo_download(self, tmp_path):
+        download_dir = tmp_path / "tmpXXX"
+        (download_dir / "repo").mkdir(parents=True)
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download",
+                   return_value=({}, download_dir / "repo")) as mock_download, \
+             patch("iagitup.archive_watchlist.upload_ia", return_value=("id", {}, "b")):
+            archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False)
+        assert mock_download.call_args.kwargs["repo_data"] is SAMPLE_REPO
+
+
+class TestStateLocking:
+    def test_state_write_and_save_hold_lock_but_upload_does_not(self, tmp_path):
+        """The in-memory state write and the save must be serialised by
+        _state_lock, while the (slow) upload must run outside it."""
+        from iagitup.archive_watchlist import main
+        seen = {}
+        fake_folder = tmp_path / "tmpXXX" / "repo"
+        fake_folder.mkdir(parents=True)
+
+        def fake_upload(*a, **kw):
+            seen["upload_locked"] = _state_lock.locked()
+            return ("ia-id", {}, "b")
+
+        def fake_save(path, state):
+            seen["save_locked"] = _state_lock.locked()
+            # json.dumps is what the real save does; it must not race.
+            json.dumps(state, indent=2)
+
+        with patch("sys.argv", ["archive-watchlist", "--top", "1", "--workers", "2"]), \
+             patch("iagitup.archive_watchlist.get_ia_credentials", return_value=("a", "s")), \
+             patch("iagitup.archive_watchlist.fetch_top_repos", return_value=[SAMPLE_REPO]), \
+             patch("iagitup.archive_watchlist.load_state", return_value={}), \
+             patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.save_state", side_effect=fake_save), \
+             patch("iagitup.archive_watchlist.upload_ia", side_effect=fake_upload):
+            main()
+
+        assert seen["upload_locked"] is False
+        assert seen["save_locked"] is True
+
+    def test_archive_repo_writes_state_under_lock(self):
+        """Patch dict.__setitem__ indirectly: use a dict subclass that records lock state."""
+        class Spy(dict):
+            def __setitem__(self, k, v):
+                self.locked_at_write = _state_lock.locked()
+                super().__setitem__(k, v)
+
+        state = Spy()
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=("ia-id", "stem")):
+            archive_repo(SAMPLE_REPO, 1, "acc", "sec", state, dry_run=False)
+        assert state.locked_at_write is True
+        assert not _state_lock.locked()  # released afterwards

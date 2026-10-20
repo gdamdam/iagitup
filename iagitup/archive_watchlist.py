@@ -44,12 +44,19 @@ from iagitup.iagitup import (
     IagitupError,
     __version__,
     _github_headers,
+    find_existing_item,
     get_ia_credentials,
     repo_download,
     upload_ia,
 )
 
 log = logging.getLogger(__name__)
+
+# Guards every write to the shared in-memory state dict *and* its
+# serialisation in save_state().  json.dumps(indent=...) uses the pure-Python
+# encoder, which iterates the dict lazily, so a concurrent insert from another
+# worker raises "dictionary changed size during iteration".
+_state_lock = threading.Lock()
 
 # Relative path; resolves to cwd so the state file lives alongside the script
 # when launched from the project root (typical cron setup).
@@ -233,8 +240,9 @@ def archive_repo(
     Skip logic (two layers):
     - Local: if ``pushed_at`` matches the cached value the repo is unchanged
       and we return immediately without touching the network or IA.
-    - Remote: ``upload_ia`` also checks ``item.exists`` on IA, so even if the
-      local state is lost, a duplicate upload is still prevented.
+    - Remote: ``find_existing_item`` checks IA *before* cloning, so even if
+      the local state is lost, neither a redundant clone nor a duplicate
+      upload happens; the state entry is re-recorded instead.
 
     The temporary directory created by ``repo_download`` is always cleaned up
     in the finally block, including any wiki subdir.
@@ -270,24 +278,36 @@ def archive_repo(
 
     repo_folder: Path | None = None
     try:
-        _, repo_folder = repo_download(repo_data["html_url"], work_dir=work_dir)
-        custom_meta = build_custom_meta(repo_data, rank)
-        identifier, _, _ = upload_ia(
-            repo_folder,
-            repo_data,
-            s3_access=s3_access,
-            s3_secret=s3_secret,
-            custom_meta=custom_meta,
-        )
-        log.info(f"           → https://archive.org/details/{identifier}")
+        # Remote skip, checked *before* cloning: the Search API already gave
+        # us pushed_at, so the identifier is known without a clone.
+        existing = find_existing_item(repo_data, s3_access, s3_secret)
+        if existing is not None:
+            identifier = existing[0]
+            log.info(f"           already archived → https://archive.org/details/{identifier}")
+        else:
+            # Pass the Search API dict so repo_download doesn't hit the
+            # GitHub API a second time for metadata we already have.
+            _, repo_folder = repo_download(
+                repo_data["html_url"], work_dir=work_dir, repo_data=repo_data,
+            )
+            custom_meta = build_custom_meta(repo_data, rank)
+            identifier, _, _ = upload_ia(
+                repo_folder,
+                repo_data,
+                s3_access=s3_access,
+                s3_secret=s3_secret,
+                custom_meta=custom_meta,
+            )
+            log.info(f"           → https://archive.org/details/{identifier}")
 
-        # Record the successful archive so future runs can skip this snapshot.
-        state[full_name] = {
-            "pushed_at": pushed_at,
-            "archived_at": datetime.now(timezone.utc).isoformat(),
-            "ia_identifier": identifier,
-            "stars": stars,
-        }
+        # Record the archive so future runs can skip this snapshot locally.
+        with _state_lock:
+            state[full_name] = {
+                "pushed_at": pushed_at,
+                "archived_at": datetime.now(timezone.utc).isoformat(),
+                "ia_identifier": identifier,
+                "stars": stars,
+            }
         return "archived"
 
     except IagitupError as exc:
@@ -404,11 +424,8 @@ def main() -> None:
             log.info(f"Filtered out {skipped} repo(s) exceeding {args.max_size} MB.")
 
     counts: dict[str, int] = {"archived": 0, "skipped": 0, "failed": 0}
-    # save_lock guards concurrent writes to the state file on disk.
-    # The in-memory state dict doesn't need a lock because each thread
-    # writes to a unique key (the repo's full_name).
-    # counts_lock guards the shared counters dict.
-    save_lock = threading.Lock()
+    # _state_lock (module-level) guards the in-memory state dict and the
+    # state file on disk; counts_lock guards the shared counters dict.
     counts_lock = threading.Lock()
 
     work_dir = Path(args.work_dir) if args.work_dir else None
@@ -421,7 +438,7 @@ def main() -> None:
         # Persist state only when something changed (not on skips) to reduce
         # unnecessary disk I/O; also ensures progress survives a mid-run crash.
         if not args.dry_run and result != "skipped":
-            with save_lock:
+            with _state_lock:
                 save_state(args.state_file, state)
         return result
 

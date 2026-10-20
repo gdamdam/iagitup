@@ -17,7 +17,7 @@ __author__ = "Giovanni Damiola"
 __copyright__ = "Copyright 2018-2026, Giovanni Damiola"
 __main_name__ = "iagitup"
 __license__ = "GPLv3"
-__version__ = "3.6.2"
+__version__ = "3.6.3"
 
 import configparser
 import logging
@@ -195,7 +195,45 @@ def _build_repo_data_from_clone(
 # Download
 # ---------------------------------------------------------------------------
 
-def repo_download(repo_url: str, work_dir: Path | None = None) -> tuple[dict, Path]:
+def fetch_repo_metadata(repo_url: str) -> dict | None:
+    """Fetch GitHub API metadata for *repo_url* without cloning anything.
+
+    Returns ``None`` for non-GitHub URLs, whose metadata can only be derived
+    from the clone itself.  Callers can use the result to check whether a
+    snapshot already exists on IA *before* paying for a clone.
+
+    Args:
+        repo_url: The git repository URL.
+
+    Returns:
+        GitHub API metadata dict (with ``_platform`` injected), or ``None``.
+
+    Raises:
+        RepoDownloadError: If the URL is invalid or the API call fails.
+    """
+    owner, repo_name, hostname = _parse_repo_url(repo_url)
+    if hostname != "github.com":
+        return None
+
+    api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
+    resp = requests.get(api_url, headers=_github_headers(), timeout=30)
+    if resp.status_code != 200:
+        raise RepoDownloadError(
+            f"GitHub API returned {resp.status_code} for {repo_url}"
+        )
+
+    repo_data: dict = resp.json()
+    # Inject platform marker so upload_ia() can build platform-aware
+    # identifiers and subject tags from a single code path.
+    repo_data["_platform"] = "github.com"
+    return repo_data
+
+
+def repo_download(
+    repo_url: str,
+    work_dir: Path | None = None,
+    repo_data: dict | None = None,
+) -> tuple[dict, Path]:
     """Download a git repository to a local temporary directory.
 
     For GitHub URLs, metadata is fetched from the GitHub API.  For all other
@@ -210,6 +248,9 @@ def repo_download(repo_url: str, work_dir: Path | None = None) -> tuple[dict, Pa
         repo_url: The git repository URL.
         work_dir: Parent directory for the temporary clone.  When ``None``
             (default), the system temp directory is used.
+        repo_data: Pre-fetched GitHub metadata (e.g. from
+            ``fetch_repo_metadata`` or the Search API).  When given, the
+            GitHub API is not called again.
 
     Returns:
         Tuple of (metadata_dict, local_repo_path).
@@ -217,29 +258,18 @@ def repo_download(repo_url: str, work_dir: Path | None = None) -> tuple[dict, Pa
     Raises:
         RepoDownloadError: If the API call / clone fails.
     """
-    owner, repo_name, hostname = _parse_repo_url(repo_url)
+    _, repo_name, hostname = _parse_repo_url(repo_url)
 
-    if hostname == "github.com":
-        # --- GitHub path: rich API metadata ---
-        api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
+    if repo_data is None and hostname == "github.com":
+        repo_data = fetch_repo_metadata(repo_url)
 
-        resp = requests.get(api_url, headers=_github_headers(), timeout=30)
-        if resp.status_code != 200:
-            raise RepoDownloadError(
-                f"GitHub API returned {resp.status_code} for {repo_url}"
-            )
-
-        repo_data: dict = resp.json()
-        # Inject platform marker so upload_ia() can build platform-aware
-        # identifiers and subject tags from a single code path.
-        repo_data["_platform"] = "github.com"
+    if repo_data is not None:
         clone_url = repo_data["clone_url"]
     else:
         # --- Generic path: clone directly, extract metadata from git history ---
         # We don't call any platform API; metadata is built after the clone
         # completes via _build_repo_data_from_clone().
         clone_url = repo_url
-        repo_data = None
 
     # mkdtemp creates an isolated directory; the wiki (if any) will live
     # alongside the repo clone inside this same root.
@@ -252,8 +282,12 @@ def repo_download(repo_url: str, work_dir: Path | None = None) -> tuple[dict, Pa
         # transfer progress (counting, compressing, receiving objects)
         # is streamed to stderr in real time.  The --progress flag forces
         # progress output even when stderr is not a TTY.
+        # "--" stops git from parsing a URL that starts with "-" as an
+        # option, and GIT_TERMINAL_PROMPT=0 makes a private or missing repo
+        # fail fast instead of hanging on a credential prompt (cron-safe).
         subprocess.check_call(
-            ["git", "clone", "--progress", clone_url, str(repo_folder)],
+            ["git", "clone", "--progress", "--", clone_url, str(repo_folder)],
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
     except subprocess.CalledProcessError as exc:
         # Clean the whole temp dir on failure so nothing leaks.
@@ -267,6 +301,7 @@ def repo_download(repo_url: str, work_dir: Path | None = None) -> tuple[dict, Pa
         raise
 
     if repo_data is None:
+        owner, _, _ = _parse_repo_url(repo_url)
         repo_data = _build_repo_data_from_clone(
             repo_url, owner, repo_name, hostname, repo_folder,
         )
@@ -463,6 +498,55 @@ def _fetch_and_archive_lfs(repo_folder: Path, archive_name: str) -> Path | None:
 # Upload
 # ---------------------------------------------------------------------------
 
+def _item_names(repo_data: dict) -> tuple[str, str, datetime]:
+    """Derive the IA identifier and bundle stem from *repo_data*.
+
+    Using pushed_at (not created_at) ensures a new IA item is created
+    whenever the repo receives new commits, while unchanged repos reuse
+    the same identifier and are de-duplicated via the existence check.
+
+    Returns:
+        Tuple of (ia_item_identifier, bundle_filename_stem, pushed_datetime).
+    """
+    pushed = datetime.strptime(repo_data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
+    pushed_date = pushed.strftime("%Y-%m-%d_%H-%M-%S")  # no spaces: used in filenames / identifiers
+    # "owner/repo" -> "owner-repo" because IA identifiers cannot contain slashes.
+    repo_name = repo_data["full_name"].replace("/", "-")
+    # bundle_stem doubles as the IA item identifier suffix and the .bundle
+    # filename, keeping both in sync for predictable download URLs.
+    bundle_stem = f"{repo_name}_-_{pushed_date}"
+    # IA identifier format: "<platform>-owner-repo_-_YYYY-MM-DD_HH-MM-SS"
+    # Default to "github.com" for backward compatibility with existing dicts
+    # (e.g. from archive_watchlist) that don't include "_platform".
+    platform = repo_data.get("_platform", "github.com")
+    itemname = f"{platform}-{repo_name}_-_{pushed_date}"
+    return itemname, bundle_stem, pushed
+
+
+def find_existing_item(
+    repo_data: dict, s3_access: str, s3_secret: str,
+) -> tuple[str, str] | None:
+    """Return ``(identifier, bundle_stem)`` if this snapshot is already on IA.
+
+    The identifier encodes ``pushed_at``, so only the exact same snapshot
+    matches; a repo with new commits always yields a fresh identifier.
+    Call this before ``repo_download`` whenever metadata is available
+    up front (GitHub) to skip the clone entirely.
+
+    Raises:
+        UploadError: If the Internet Archive cannot be reached.
+    """
+    itemname, bundle_stem, _ = _item_names(repo_data)
+    try:
+        session = internetarchive.get_session(
+            config={"s3": {"access": s3_access, "secret": s3_secret}}
+        )
+        item = session.get_item(itemname)
+    except Exception as exc:
+        raise UploadError(f"Failed to connect to Internet Archive: {exc}") from exc
+    return (itemname, bundle_stem) if item.exists else None
+
+
 def upload_ia(
     repo_folder: Path,
     repo_data: dict,
@@ -475,8 +559,9 @@ def upload_ia(
     Workflow
     --------
     1. Compute the IA item identifier from the repo name and last-push date.
-    2. **Early-exit**: check whether the item already exists on IA *before*
-       doing any heavy work — avoids redundant clones and uploads.
+    2. **Early-exit**: check whether the item already exists on IA before
+       bundling or uploading.  (The clone has already happened by now; use
+       ``find_existing_item`` before ``repo_download`` to skip it too.)
     3. Download the owner avatar and clone the wiki **concurrently** (both
        are pure network I/O with no dependency on each other).
     4. Build the HTML description (now that wiki status is known).
@@ -502,26 +587,12 @@ def upload_ia(
         UploadError: If bundle creation or any IA upload fails.
     """
     # --- Derive names and timestamps from the push date ---
-    # Using pushed_at (not created_at) ensures a new IA item is created
-    # whenever the repo receives new commits, while unchanged repos reuse
-    # the same identifier and are de-duplicated via the early-exit below.
-    pushed = datetime.strptime(repo_data["pushed_at"], "%Y-%m-%dT%H:%M:%SZ")
-    pushed_date = pushed.strftime("%Y-%m-%d_%H-%M-%S")     # for filenames / identifiers (no spaces)
+    itemname, bundle_stem, pushed = _item_names(repo_data)
     raw_pushed_date = pushed.strftime("%Y-%m-%d %H:%M:%S")  # human-readable, stored in IA metadata
     date = pushed.strftime("%Y-%m-%d")
     year = pushed.year
-
-    # "owner/repo" -> "owner-repo" because IA identifiers cannot contain slashes.
-    repo_name = repo_data["full_name"].replace("/", "-")
     original_url = repo_data["html_url"]
-    # bundle_stem doubles as the IA item identifier suffix and the .bundle
-    # filename, keeping both in sync for predictable download URLs.
-    bundle_stem = f"{repo_name}_-_{pushed_date}"
-    # IA identifier format: "<platform>-owner-repo_-_YYYY-MM-DD_HH-MM-SS"
-    # Default to "github.com" for backward compatibility with existing dicts
-    # (e.g. from archive_watchlist) that don't include "_platform".
     platform = repo_data.get("_platform", "github.com")
-    itemname = f"{platform}-{repo_name}_-_{pushed_date}"
 
     owner_url = repo_data["owner"]["html_url"]
     owner_name = repo_data["owner"]["login"]
@@ -593,8 +664,10 @@ def upload_ia(
             f"git lfs checkout</code></pre>"
         )
 
+    # GitHub returns "description": null for repos without one; coalesce so
+    # the literal text "None" never ends up in the IA description.
     description = (
-        f"<br/>{repo_data.get('description', '')}<br/><br/>"
+        f"<br/>{repo_data.get('description') or ''}<br/><br/>"
         f"{get_description_from_readme(repo_folder)}<br/>"
         f"{restore_snippet}<br/><br/>"
         f'Source: <a href="{original_url}">{original_url}</a><br/>'

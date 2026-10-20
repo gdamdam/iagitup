@@ -11,7 +11,6 @@ import pytest
 from iagitup.iagitup import (
     BundleError,
     CredentialsError,
-    LfsError,
     RepoDownloadError,
     UploadError,
     __version__,
@@ -25,6 +24,8 @@ from iagitup.iagitup import (
     _parse_repo_url,
     _platform_label,
     create_bundle,
+    fetch_repo_metadata,
+    find_existing_item,
     get_description_from_readme,
     get_ia_credentials,
     repo_download,
@@ -951,6 +952,8 @@ class TestCli:
 
         with patch("sys.argv", ["iagitup", "https://github.com/o/r"]), \
              patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")), \
+             patch("iagitup.__main__.fetch_repo_metadata", return_value=None), \
+             patch("iagitup.__main__.find_existing_item", return_value=None), \
              patch("iagitup.__main__.repo_download", return_value=(repo_data, fake_folder)), \
              patch("iagitup.__main__.upload_ia", return_value=("ia-id", {"title": "ia-id"}, "bundle")):
             main()
@@ -968,9 +971,136 @@ class TestCli:
 
         with patch("sys.argv", ["iagitup", "https://gitlab.com/user/proj"]), \
              patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")), \
+             patch("iagitup.__main__.fetch_repo_metadata", return_value=None), \
+             patch("iagitup.__main__.find_existing_item", return_value=None), \
              patch("iagitup.__main__.repo_download", return_value=(repo_data, fake_folder)), \
              patch("iagitup.__main__.upload_ia", return_value=("gl-id", {"title": "gl-id"}, "bundle")):
             main()
 
         out = capsys.readouterr().out
         assert "Upload FINISHED" in out
+
+
+# ---------------------------------------------------------------------------
+# fetch_repo_metadata / find_existing_item / clone hardening (3.6.3)
+# ---------------------------------------------------------------------------
+
+class TestFetchRepoMetadata:
+    def test_github_returns_api_dict_with_platform(self):
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}
+        with patch("iagitup.iagitup.requests.get", return_value=resp):
+            data = fetch_repo_metadata("https://github.com/o/r")
+        assert data["_platform"] == "github.com"
+        assert data["full_name"] == "o/r"
+
+    def test_non_github_returns_none_without_api_call(self):
+        with patch("iagitup.iagitup.requests.get") as mock_get:
+            assert fetch_repo_metadata("https://gitlab.com/o/r") is None
+        mock_get.assert_not_called()
+
+    def test_raises_on_api_error(self):
+        with patch("iagitup.iagitup.requests.get", return_value=MagicMock(status_code=403)):
+            with pytest.raises(RepoDownloadError, match="403"):
+                fetch_repo_metadata("https://github.com/o/r")
+
+
+class TestFindExistingItem:
+    DATA = TestUploadIa.GH_DATA
+
+    def _session(self, exists):
+        session = MagicMock()
+        session.get_item.return_value = MagicMock(exists=exists)
+        return session
+
+    def test_returns_identifier_and_stem_when_exists(self):
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=self._session(True)):
+            result = find_existing_item(self.DATA, "a", "s")
+        assert result == (
+            "github.com-owner-repo_-_2026-01-15_10-30-00",
+            "owner-repo_-_2026-01-15_10-30-00",
+        )
+
+    def test_returns_none_when_absent(self):
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=self._session(False)):
+            assert find_existing_item(self.DATA, "a", "s") is None
+
+    def test_wraps_connection_errors(self):
+        with patch("iagitup.iagitup.internetarchive.get_session", side_effect=OSError("down")):
+            with pytest.raises(UploadError, match="down"):
+                find_existing_item(self.DATA, "a", "s")
+
+
+class TestCloneHardening:
+    def test_clone_uses_separator_and_disables_prompt(self, tmp_path):
+        with patch("iagitup.iagitup.subprocess.check_call") as mock_clone, \
+             patch("iagitup.iagitup.tempfile.mkdtemp", return_value=str(tmp_path)), \
+             patch("iagitup.iagitup._build_repo_data_from_clone", return_value={}):
+            repo_download("https://gitlab.com/user/proj")
+        args, kwargs = mock_clone.call_args
+        cmd = args[0]
+        # "--" must come right before the URL so a "-"-prefixed URL can't be parsed as an option.
+        assert cmd[cmd.index("--") + 1] == "https://gitlab.com/user/proj"
+        assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+    def test_prefetched_metadata_skips_github_api(self, tmp_path):
+        prefetched = {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}
+        with patch("iagitup.iagitup.subprocess.check_call"), \
+             patch("iagitup.iagitup.tempfile.mkdtemp", return_value=str(tmp_path)), \
+             patch("iagitup.iagitup.requests.get") as mock_get:
+            data, _ = repo_download("https://github.com/o/r", repo_data=prefetched)
+        mock_get.assert_not_called()
+        assert data is prefetched
+
+
+class TestUploadIaNullDescription:
+    def test_null_github_description_is_not_rendered(self, tmp_path):
+        repo_folder = tmp_path / "repo"
+        repo_folder.mkdir()
+        data = {**TestUploadIa.GH_DATA, "description": None}
+        session = MagicMock()
+        session.get_item.return_value = MagicMock(exists=False)
+        fake_bundle = repo_folder / "x.bundle"
+        fake_bundle.write_text("b")
+
+        with patch("iagitup.iagitup.internetarchive.get_session", return_value=session), \
+             patch("iagitup.iagitup._download_avatar", return_value=None), \
+             patch("iagitup.iagitup._download_wiki", return_value=None), \
+             patch("iagitup.iagitup.create_bundle", return_value=fake_bundle), \
+             patch("iagitup.iagitup.get_description_from_readme", return_value=""):
+            _, meta, _ = upload_ia(repo_folder, data, s3_access="a", s3_secret="s")
+
+        assert "None" not in meta["description"]
+
+
+class TestCliAlreadyArchived:
+    def test_github_duplicate_skips_clone_and_reports(self, capsys):
+        from iagitup.__main__ import main
+        with patch("sys.argv", ["iagitup", "https://github.com/o/r"]), \
+             patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")), \
+             patch("iagitup.__main__.fetch_repo_metadata", return_value={"pushed_at": "x"}), \
+             patch("iagitup.__main__.find_existing_item", return_value=("ia-id", "stem")), \
+             patch("iagitup.__main__.repo_download") as mock_download, \
+             patch("iagitup.__main__.upload_ia") as mock_upload:
+            main()
+        mock_download.assert_not_called()
+        mock_upload.assert_not_called()
+        out = capsys.readouterr().out
+        assert "already archived" in out
+        assert "Upload FINISHED" not in out
+        assert "https://archive.org/download/ia-id/stem.bundle" in out
+
+    def test_non_github_duplicate_checked_after_clone(self, tmp_path, capsys):
+        from iagitup.__main__ import main
+        fake_folder = tmp_path / "tmpXXX" / "proj"
+        fake_folder.mkdir(parents=True)
+        with patch("sys.argv", ["iagitup", "https://gitlab.com/u/proj"]), \
+             patch("iagitup.__main__.get_ia_credentials", return_value=("a", "s")), \
+             patch("iagitup.__main__.fetch_repo_metadata", return_value=None), \
+             patch("iagitup.__main__.repo_download", return_value=({"pushed_at": "x"}, fake_folder)), \
+             patch("iagitup.__main__.find_existing_item", return_value=("gl-id", "stem")), \
+             patch("iagitup.__main__.upload_ia") as mock_upload:
+            main()
+        mock_upload.assert_not_called()
+        assert "already archived" in capsys.readouterr().out
+        assert not fake_folder.parent.exists()  # temp dir still cleaned up

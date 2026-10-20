@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.6.3] - 2026-10-20
+
+### Fixed
+
+- **Race in `archive-watchlist` state save** -- workers wrote to the shared state dict while another worker serialised it with `json.dumps`, which could raise "dictionary changed size during iteration", miscount a successful archive as failed, and drop that save. All state writes and saves are now serialised by a single lock.
+- **Literal `None` in IA descriptions** -- GitHub returns `"description": null` for repos without one, which rendered as the text "None" at the top of the item description.
+- **Redundant clone of already-archived snapshots** -- both the CLI and `archive-watchlist` now check whether the IA item exists *before* cloning (GitHub URLs; non-GitHub URLs are checked right after the clone, before bundling). `archive-watchlist` also no longer calls the GitHub repos API a second time for metadata the Search API already returned.
+- **Misleading "Upload FINISHED" on duplicates** -- the CLI now prints "already archived -- nothing uploaded" with the existing item links instead.
+- **Clone hardening** -- `git clone` is invoked with `--` before the URL so a `-`-prefixed URL can't be parsed as a git option, and with `GIT_TERMINAL_PROMPT=0` so a private or missing repo fails fast instead of hanging on a credential prompt (matching the wiki clone). Credential helpers still work; interactive password entry does not.
+
+### Added
+
+- `fetch_repo_metadata(repo_url)` and `find_existing_item(repo_data, s3_access, s3_secret)` public helpers.
+- `repo_download(..., repo_data=...)` accepts pre-fetched GitHub metadata to skip the API call.
+- `ruff check` step in GitHub Actions and GitLab CI.
+
+## [3.6.2] - 2026-03-11
+
+### Changed
+
+- `archive-watchlist`: `--top-n` renamed to `--top`.
+
+## [3.6.1] - 2026-03-11
+
+### Added
+
+- `--work-dir` option (CLI and `archive-watchlist`) to choose the directory for temporary clones instead of the system temp directory.
+
+## [3.6.0] - 2026-03-11
+
+### Added
+
+- `--max-size N` flag for `archive-watchlist` -- skip repositories larger than N MB (based on GitHub's reported size) to avoid enormous clones.
+
+## [3.5.0] - 2026-03-11
+
+### Added
+
+- `--since` / `--until` date range filters for `archive-watchlist` (YYYY-MM-DD), mutually exclusive with `--days`. README and `--help` updated.
+
 ## [3.4.0] - 2026-03-11
 
 ### Added

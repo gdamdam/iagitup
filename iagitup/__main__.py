@@ -31,6 +31,8 @@ from pathlib import Path
 from iagitup.iagitup import (
     IagitupError,
     __version__,
+    fetch_repo_metadata,
+    find_existing_item,
     get_ia_credentials,
     repo_download,
     upload_ia,
@@ -85,19 +87,35 @@ def main() -> None:
             )
             sys.exit(1)
 
-    print(f":: Downloading {args.repo_url} ...")
     repo_folder = None  # track for cleanup in all exit paths
+    existing = None  # (identifier, bundle_stem) when the snapshot is already on IA
     try:
         work_dir = Path(args.work_dir) if args.work_dir else None
-        repo_data, repo_folder = repo_download(args.repo_url, work_dir=work_dir)
 
-        identifier, meta, bundle_stem = upload_ia(
-            repo_folder,
-            repo_data,
-            s3_access=s3_access,
-            s3_secret=s3_secret,
-            custom_meta=custom_meta,
-        )
+        # GitHub metadata is available before cloning, so the duplicate check
+        # can run first and skip the (potentially huge) clone entirely.
+        # Non-GitHub metadata only exists after the clone, so check afterwards.
+        repo_data = fetch_repo_metadata(args.repo_url)
+        if repo_data is not None:
+            existing = find_existing_item(repo_data, s3_access, s3_secret)
+
+        if existing is None:
+            print(f":: Downloading {args.repo_url} ...")
+            prefetched = repo_data
+            repo_data, repo_folder = repo_download(
+                args.repo_url, work_dir=work_dir, repo_data=prefetched,
+            )
+            if prefetched is None:
+                existing = find_existing_item(repo_data, s3_access, s3_secret)
+
+        if existing is None:
+            identifier, meta, bundle_stem = upload_ia(
+                repo_folder,
+                repo_data,
+                s3_access=s3_access,
+                s3_secret=s3_secret,
+                custom_meta=custom_meta,
+            )
     except KeyboardInterrupt:
         print("\n:: Interrupted — cleaning up temporary files ...", file=sys.stderr)
         sys.exit(130)
@@ -110,6 +128,15 @@ def main() -> None:
         # repos from accumulating in /tmp and filling the user's disk.
         if repo_folder is not None:
             shutil.rmtree(repo_folder.parent, ignore_errors=True)
+
+    if existing is not None:
+        identifier, bundle_stem = existing
+        print("\n:: This repository snapshot is already archived — nothing uploaded.")
+        print(f"   Archived repository: https://archive.org/details/{identifier}")
+        print(
+            f"   Git bundle:          https://archive.org/download/{identifier}/{bundle_stem}.bundle"
+        )
+        return
 
     # Print a human-friendly summary with direct links to the archived item.
     print("\n:: Upload FINISHED.")
