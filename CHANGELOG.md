@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- PyPI classifier: Development Status is now `5 - Production/Stable`.
 - `archive_repo()` accepts optional `failures`, `failures_lock` and `keep_work_dir` arguments (all default to the previous behaviour).
 
 ## [3.6.3] - 2026-10-20

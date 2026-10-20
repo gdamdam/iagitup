@@ -12,7 +12,7 @@ authors = [{ name = "Giovanni Damiola" }]
 requires-python = ">=3.10"
 keywords = ["github", "gitlab", "bitbucket", "gitea", "internetarchive", "archiving"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
