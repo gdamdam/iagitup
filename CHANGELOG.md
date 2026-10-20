@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.1] - 2026-10-20
+
+### Changed
+
+- PyPI page: removed the downloads badge from the project description.
+- Releases are now published from GitHub Actions via PyPI trusted publishing (push a `vX.Y.Z` tag), which also verifies the repository link on PyPI.
+
 ## [3.7.0] - 2026-10-20
 
 ### Added
