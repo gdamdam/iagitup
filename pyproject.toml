@@ -48,3 +48,8 @@ pythonpath = ["."]
 [tool.ruff]
 # Keep agent worktrees and scratch imports out of local lint runs.
 extend-exclude = [".claude", "to_import"]
+
+[tool.ruff.lint]
+# Pin the rule set explicitly: ruff's defaults grew in 0.17 (SIM, RUF, ...),
+# which broke CI because the workflow installs the latest ruff.
+select = ["E4", "E7", "E9", "F"]
