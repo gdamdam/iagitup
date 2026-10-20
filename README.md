@@ -129,7 +129,24 @@ iagitup [options] <repo_url>
 | `repo_url` | -- | *(required)* | Git repository URL to archive (GitHub, GitLab, Bitbucket, or any HTTPS git URL) |
 | `--metadata` | `-m` | -- | Custom metadata fields (see [Custom Metadata](#custom-metadata)) |
 | `--work-dir` | -- | system temp | Directory for temporary clones |
+| `--dry-run` | -- | off | Preview identifier, bundle URL and metadata without uploading; no credentials needed. GitHub repos are not cloned |
+| `--keep-work-dir` | -- | off | Never delete the temporary clone (on success or failure); its path is printed to stderr |
+| `--resume PATH` | -- | -- | Reuse a clone kept with `--keep-work-dir` instead of downloading again (implies `--keep-work-dir`). For GitHub repos metadata is re-fetched, so if the repo was pushed to since the clone, the identifier reflects the newer date |
+| `--submodules` | -- | off | Also clone submodules and upload each as an extra bundle |
+| `--releases` | -- | off | Also archive GitHub release notes and assets (GitHub only) |
+| `--issues` | -- | off | Also archive GitHub issues and pull requests (GitHub only) |
 | `--version` | `-v` | -- | Print version and exit |
+
+Resume an interrupted upload:
+
+```bash
+# First attempt: keep the clone so a failed upload does not lose it
+iagitup --keep-work-dir https://github.com/user/repo
+# ... upload fails; stderr shows ":: Work directory kept: /tmp/tmpabc123/repo"
+
+# Retry without cloning again
+iagitup --resume /tmp/tmpabc123/repo https://github.com/user/repo
+```
 
 ### `archive-watchlist`
 
