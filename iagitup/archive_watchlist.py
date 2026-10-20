@@ -21,6 +21,9 @@ Usage:
     python archive_watchlist.py --until 2025-12-31                  # up to a date
     python archive_watchlist.py --max-size 500                       # skip repos > 500 MB
     python archive_watchlist.py --workers 8                         # more parallelism
+    python archive_watchlist.py --top 500                           # paginated, max 1000
+    python archive_watchlist.py --json-summary run.json --max-failures 3  # cron monitoring
+    python archive_watchlist.py --keep-work-dir                     # keep clones for --resume
     python archive_watchlist.py --dry-run        # preview without uploading
     python archive_watchlist.py --state-file /path/to/state.json
 
@@ -31,9 +34,11 @@ Cron example (daily at 03:00):
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -62,6 +67,11 @@ _state_lock = threading.Lock()
 # when launched from the project root (typical cron setup).
 DEFAULT_STATE_FILE = Path("watchlist_state.json")
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
+# The Search API only exposes the first 1000 results (10 pages of 100).
+MAX_TOP_N = 1000
+# Exit code used when --max-failures is exceeded; distinct from 1 (fatal setup
+# errors) so cron wrappers can tell "ran, but too many failures" apart.
+EXIT_TOO_MANY_FAILURES = 2
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +130,8 @@ def fetch_top_repos(
     available to raise the rate limit from 60 to 5 000 requests/hour.
 
     Args:
-        n: Number of repositories to fetch. Capped at 100 (API page limit).
+        n: Number of repositories to fetch, paginated 100 per request. The
+            Search API exposes at most 1000 results (``MAX_TOP_N``).
         days: If set, only include repositories created within the last
             ``days`` days.  When ``None`` (default), no creation-date filter
             is applied and the query returns the all-time most-starred repos.
@@ -134,12 +145,10 @@ def fetch_top_repos(
         List of raw repository dicts from the GitHub API.
 
     Raises:
-        SystemExit: If the API returns a non-200 status code.
+        SystemExit: If the first page returns a non-200 status code.  A
+            failure on a later page, or an exhausted rate limit, returns the
+            repositories collected so far instead.
     """
-    # GitHub Search API returns at most 100 results per page; we don't
-    # paginate because the top-100-by-stars use case rarely needs more.
-    per_page = min(n, 100)
-
     query = "stars:>1"
     if days is not None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -152,33 +161,66 @@ def fetch_top_repos(
         else:
             query += f" created:<={until}"
 
-    params = {
-        "q": query,
-        "sort": "stars",
-        "order": "desc",
-        "per_page": per_page,
-    }
-    resp = requests.get(
-        GITHUB_SEARCH_URL,
-        headers=_github_headers(),
-        params=params,
-        timeout=30,
-    )
+    # The search endpoint has a secondary limit (10 req/min unauthenticated,
+    # 30 with a token), so throttle page requests when no token is available.
+    throttle = not os.environ.get("GITHUB_TOKEN")
 
-    # Check status before reading rate-limit headers: on error responses
-    # these headers may be absent, and the fallback 9999 would be misleading.
-    if resp.status_code != 200:
-        log.error(f"GitHub API error {resp.status_code}: {resp.text[:200]}")
-        sys.exit(1)
-
-    remaining = int(resp.headers.get("X-RateLimit-Remaining", 9999))
-    if remaining <= 5:
-        log.warning(
-            f"GitHub API rate limit almost exhausted ({remaining} requests left). "
-            "Set GITHUB_TOKEN to increase the limit."
+    repos: list[dict] = []
+    remaining = 9999
+    page = 1
+    while len(repos) < n:
+        per_page = min(100, n - len(repos))
+        params = {
+            "q": query,
+            "sort": "stars",
+            "order": "desc",
+            "per_page": per_page,
+            "page": page,
+        }
+        resp = requests.get(
+            GITHUB_SEARCH_URL,
+            headers=_github_headers(),
+            params=params,
+            timeout=30,
         )
 
-    repos = resp.json().get("items", [])
+        # Check status before reading rate-limit headers: on error responses
+        # these headers may be absent, and the fallback 9999 would be misleading.
+        if resp.status_code != 200:
+            log.error(f"GitHub API error {resp.status_code}: {resp.text[:200]}")
+            if page == 1:
+                sys.exit(1)
+            # Later page: keep the partial result rather than discarding work.
+            return repos
+
+        items = resp.json().get("items", [])
+        repos.extend(items)
+
+        remaining = int(resp.headers.get("X-RateLimit-Remaining", 9999))
+        if remaining == 0:
+            reset = resp.headers.get("X-RateLimit-Reset")
+            try:
+                reset_str = datetime.fromtimestamp(int(reset), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            except (TypeError, ValueError):
+                reset_str = "unknown"
+            log.error(
+                f"GitHub API rate limit exhausted (X-RateLimit-Reset: {reset_str}); "
+                f"returning {len(repos)} repositories collected so far."
+            )
+            return repos
+        if remaining <= 5:
+            log.warning(
+                f"GitHub API rate limit almost exhausted ({remaining} requests left). "
+                "Set GITHUB_TOKEN to increase the limit."
+            )
+
+        # A short page means GitHub has no more results for this query.
+        if len(items) < per_page:
+            break
+        page += 1
+        if len(repos) < n and throttle:
+            time.sleep(2)
+
     log.info(f"Fetched {len(repos)} repositories from GitHub (rate limit remaining: {remaining}).")
     return repos
 
@@ -226,6 +268,9 @@ def build_custom_meta(repo_data: dict, rank: int) -> dict:
 # Archive logic
 # ---------------------------------------------------------------------------
 
+# Fallback lock for callers that pass ``failures`` without their own lock.
+_FAILURES_LOCK = threading.Lock()
+
 def archive_repo(
     repo_data: dict,
     rank: int,
@@ -234,6 +279,9 @@ def archive_repo(
     state: dict,
     dry_run: bool,
     work_dir: Path | None = None,
+    failures: list | None = None,
+    failures_lock: "threading.Lock | None" = None,
+    keep_work_dir: bool = False,
 ) -> str:
     """Download and archive a single repository, updating the state on success.
 
@@ -244,8 +292,8 @@ def archive_repo(
       the local state is lost, neither a redundant clone nor a duplicate
       upload happens; the state entry is re-recorded instead.
 
-    The temporary directory created by ``repo_download`` is always cleaned up
-    in the finally block, including any wiki subdir.
+    The temporary directory created by ``repo_download`` is cleaned up in the
+    finally block, including any wiki subdir, unless ``keep_work_dir`` is set.
 
     Args:
         repo_data: Raw repository dict from the GitHub API.
@@ -255,6 +303,13 @@ def archive_repo(
         state: Shared state dict (updated in-place on successful archive).
         dry_run: When True, log what would happen without uploading anything.
         work_dir: Parent directory for temporary clones (``None`` = system temp).
+        failures: Optional list that receives ``{"repo", "error"}`` entries on
+            failure, so callers can build a structured report.  The function
+            still returns ``"failed"``; this is purely additive.
+        failures_lock: Lock guarding appends to ``failures`` (worker threads
+            share one list).  A module-level lock is used if omitted.
+        keep_work_dir: When True, leave the temp clone on disk and log its
+            path so the run can be resumed with the main CLI's ``--resume``.
 
     Returns:
         ``"skipped"``, ``"archived"``, or ``"failed"``.
@@ -312,11 +367,17 @@ def archive_repo(
 
     except IagitupError as exc:
         log.error(f"           FAILED: {exc}")
+        if failures is not None:
+            with failures_lock or _FAILURES_LOCK:
+                failures.append({"repo": full_name, "error": str(exc)})
         return "failed"
     finally:
-        # Clean the entire mkdtemp root (includes repo + wiki/ subdir).
         if repo_folder is not None:
-            shutil.rmtree(repo_folder.parent, ignore_errors=True)
+            if keep_work_dir:
+                log.info(f"           Work dir kept: {repo_folder.parent} (resume with iagitup --resume)")
+            else:
+                # Clean the entire mkdtemp root (includes repo + wiki/ subdir).
+                shutil.rmtree(repo_folder.parent, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +397,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--top", type=int, default=100,
-        help="Number of top repositories to check (default: 100, max: 100).",
+        help=f"Number of top repositories to check (default: 100, max: {MAX_TOP_N}; fetched 100 per page).",
     )
     parser.add_argument(
         "--days", type=int, default=None,
@@ -371,12 +432,24 @@ def main() -> None:
         help=f"Path to the state cache file (default: {DEFAULT_STATE_FILE}).",
     )
     parser.add_argument(
+        "--json-summary", type=Path, default=None, metavar="PATH",
+        help="Write a JSON run summary (counts, timings, failures) to PATH for cron monitoring.",
+    )
+    parser.add_argument(
+        "--max-failures", type=int, default=None, metavar="N",
+        help="Exit with code 2 if more than N repos fail (default: no threshold).",
+    )
+    parser.add_argument(
+        "--keep-work-dir", action="store_true",
+        help="Keep temporary clone directories (path is logged) so a run can be resumed with iagitup --resume.",
+    )
+    parser.add_argument(
         "--version", "-v", action="version", version=__version__,
     )
     args = parser.parse_args()
 
-    if args.top > 100:
-        parser.error("--top cannot exceed 100 (GitHub Search API limit per page).")
+    if args.top > MAX_TOP_N:
+        parser.error(f"--top cannot exceed {MAX_TOP_N} (GitHub Search API result limit).")
 
     if args.days is not None and (args.since or args.until):
         parser.error("--days cannot be combined with --since/--until.")
@@ -412,6 +485,7 @@ def main() -> None:
             log.error(f"Credentials error: {exc}")
             sys.exit(1)
 
+    started_at = datetime.now(timezone.utc)
     state = load_state(args.state_file)
     repos = fetch_top_repos(args.top, days=args.days, since=args.since, until=args.until)
 
@@ -427,12 +501,18 @@ def main() -> None:
     # _state_lock (module-level) guards the in-memory state dict and the
     # state file on disk; counts_lock guards the shared counters dict.
     counts_lock = threading.Lock()
+    failures: list[dict] = []
 
     work_dir = Path(args.work_dir) if args.work_dir else None
 
     def run(rank: int, repo_data: dict) -> str:
         """Worker: archive one repo and persist state on success."""
-        result = archive_repo(repo_data, rank, s3_access, s3_secret, state, args.dry_run, work_dir=work_dir)
+        result = archive_repo(
+            repo_data, rank, s3_access, s3_secret, state, args.dry_run,
+            work_dir=work_dir,
+            failures=failures, failures_lock=counts_lock,
+            keep_work_dir=args.keep_work_dir,
+        )
         with counts_lock:
             counts[result] += 1
         # Persist state only when something changed (not on skips) to reduce
@@ -459,6 +539,7 @@ def main() -> None:
                 log.error(f"Unexpected error archiving {name}: {exc}")
                 with counts_lock:
                     counts["failed"] += 1
+                    failures.append({"repo": name, "error": f"Unexpected error: {exc}"})
 
     verb = "would archive" if args.dry_run else "archived"
     log.info(
@@ -468,6 +549,24 @@ def main() -> None:
         f"failed: {counts['failed']} | "
         f"total checked: {len(repos)}"
     )
+
+    if args.json_summary is not None:
+        summary = {
+            "started_at": started_at.isoformat(),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "archived": counts["archived"],
+            "skipped": counts["skipped"],
+            "failed": counts["failed"],
+            "total_checked": len(repos),
+            "dry_run": args.dry_run,
+            "failures": failures,
+        }
+        args.json_summary.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        log.info(f"Wrote JSON summary to {args.json_summary}")
+
+    if args.max_failures is not None and counts["failed"] > args.max_failures:
+        log.error(f"{counts['failed']} failures exceed --max-failures {args.max_failures}.")
+        sys.exit(EXIT_TOO_MANY_FAILURES)
 
 
 if __name__ == "__main__":

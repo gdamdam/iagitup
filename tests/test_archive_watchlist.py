@@ -33,10 +33,12 @@ SAMPLE_REPO = {
 }
 
 
-def _mock_response(items=None, status=200, remaining=1000):
+def _mock_response(items=None, status=200, remaining=1000, reset=None):
     resp = MagicMock()
     resp.status_code = status
     resp.headers = {"X-RateLimit-Remaining": str(remaining)}
+    if reset is not None:
+        resp.headers["X-RateLimit-Reset"] = str(reset)
     resp.json.return_value = {"items": items or []}
     resp.text = "error details"
     return resp
@@ -196,6 +198,51 @@ class TestFetchTopRepos:
         _, kwargs = mock_get.call_args
         assert "created:<=2025-06-30" in kwargs["params"]["q"]
 
+    def test_paginates_until_n_collected(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        pages = [_mock_response([SAMPLE_REPO] * 100), _mock_response([SAMPLE_REPO] * 50)]
+        with patch("iagitup.archive_watchlist.requests.get", side_effect=pages) as mock_get, \
+             patch("iagitup.archive_watchlist.time.sleep") as mock_sleep:
+            result = fetch_top_repos(150)
+        assert len(result) == 150
+        sent = [c.kwargs["params"] for c in mock_get.call_args_list]
+        assert [(p["page"], p["per_page"]) for p in sent] == [(1, 100), (2, 50)]
+        # Unauthenticated: one 2s pause between the two pages, none after the last.
+        mock_sleep.assert_called_once_with(2)
+
+    def test_no_sleep_with_token(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        pages = [_mock_response([SAMPLE_REPO] * 100), _mock_response([SAMPLE_REPO] * 100)]
+        with patch("iagitup.archive_watchlist.requests.get", side_effect=pages), \
+             patch("iagitup.archive_watchlist.time.sleep") as mock_sleep:
+            fetch_top_repos(200)
+        mock_sleep.assert_not_called()
+
+    def test_stops_on_short_page(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        pages = [_mock_response([SAMPLE_REPO] * 100), _mock_response([SAMPLE_REPO] * 7)]
+        with patch("iagitup.archive_watchlist.requests.get", side_effect=pages) as mock_get:
+            result = fetch_top_repos(500)
+        assert len(result) == 107
+        assert mock_get.call_count == 2
+
+    def test_rate_limit_zero_returns_partial(self, monkeypatch, caplog):
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        pages = [_mock_response([SAMPLE_REPO] * 100, remaining=0, reset=1700000000)]
+        with patch("iagitup.archive_watchlist.requests.get", side_effect=pages) as mock_get:
+            with caplog.at_level(logging.ERROR):
+                result = fetch_top_repos(300)
+        assert len(result) == 100
+        assert mock_get.call_count == 1
+        assert any("2023-11-14 22:13:20 UTC" in r.message for r in caplog.records)
+
+    def test_later_page_error_returns_partial(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        pages = [_mock_response([SAMPLE_REPO] * 100), _mock_response(status=502)]
+        with patch("iagitup.archive_watchlist.requests.get", side_effect=pages):
+            result = fetch_top_repos(200)
+        assert len(result) == 100
+
 
 # ---------------------------------------------------------------------------
 # archive_repo
@@ -291,6 +338,36 @@ class TestArchiveRepo:
 
         assert not download_dir.exists()
 
+    def test_keep_work_dir_preserves_clone_and_logs_path(self, tmp_path, caplog):
+        download_dir = tmp_path / "tmpXXX"
+        download_dir.mkdir()
+        fake_folder = download_dir / "repo"
+        fake_folder.mkdir()
+
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
+            with caplog.at_level(logging.INFO):
+                archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False, keep_work_dir=True)
+
+        assert download_dir.exists()
+        assert any(str(download_dir) in r.message for r in caplog.records)
+
+    def test_failure_recorded_in_failures_list(self, tmp_path):
+        download_dir = tmp_path / "tmpXXX"
+        download_dir.mkdir()
+        fake_folder = download_dir / "repo"
+        fake_folder.mkdir()
+        failures: list = []
+
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, fake_folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", side_effect=IagitupError("boom")):
+            result = archive_repo(SAMPLE_REPO, 1, "acc", "sec", {}, dry_run=False, failures=failures)
+
+        assert result == "failed"
+        assert failures == [{"repo": "owner/repo", "error": "boom"}]
+
     def test_upload_ia_receives_custom_meta(self, tmp_path):
         download_dir = tmp_path / "tmpXXX"
         download_dir.mkdir()
@@ -322,10 +399,10 @@ class TestWatchlistCli:
                 main()
         assert __version__ in capsys.readouterr().out
 
-    def test_top_n_exceeds_100_exits(self):
+    def test_top_n_exceeds_1000_exits(self):
         from iagitup.archive_watchlist import main
         with pytest.raises(SystemExit, match="2"):
-            with patch("sys.argv", ["archive-watchlist", "--top", "200"]):
+            with patch("sys.argv", ["archive-watchlist", "--top", "1001"]):
                 main()
 
     def test_days_with_since_exits(self):
@@ -371,6 +448,63 @@ class TestWatchlistCli:
             with patch("iagitup.archive_watchlist.get_ia_credentials") as mock_creds:
                 main()
             mock_creds.assert_not_called()
+
+
+    def _run_main(self, tmp_path, extra, archive_side_effect):
+        from iagitup.archive_watchlist import main
+        argv = ["archive-watchlist", "--top", "2", "--state-file", str(tmp_path / "s.json"), *extra]
+        repo2 = {**SAMPLE_REPO, "full_name": "owner/other"}
+        with patch("sys.argv", argv), \
+             patch("iagitup.archive_watchlist.fetch_top_repos", return_value=[SAMPLE_REPO, repo2]), \
+             patch("iagitup.archive_watchlist.get_ia_credentials", return_value=("a", "b")), \
+             patch("iagitup.archive_watchlist.save_state"), \
+             patch("iagitup.archive_watchlist.archive_repo", side_effect=archive_side_effect):
+            main()
+
+    def test_json_summary_written(self, tmp_path):
+        out = tmp_path / "summary.json"
+
+        def fake(repo, rank, *a, failures=None, **kw):
+            if repo["full_name"] == "owner/other":
+                failures.append({"repo": "owner/other", "error": "boom"})
+                return "failed"
+            return "archived"
+
+        self._run_main(tmp_path, ["--json-summary", str(out)], fake)
+        data = json.loads(out.read_text())
+        assert data["archived"] == 1 and data["failed"] == 1 and data["skipped"] == 0
+        assert data["total_checked"] == 2 and data["dry_run"] is False
+        assert data["failures"] == [{"repo": "owner/other", "error": "boom"}]
+        assert data["started_at"] <= data["finished_at"]
+
+    def test_unexpected_error_recorded_as_failure(self, tmp_path):
+        out = tmp_path / "summary.json"
+
+        def fake(repo, *a, **kw):
+            raise RuntimeError("kaboom")
+
+        self._run_main(tmp_path, ["--json-summary", str(out)], fake)
+        data = json.loads(out.read_text())
+        assert data["failed"] == 2
+        assert all("kaboom" in f["error"] for f in data["failures"])
+
+    def test_max_failures_exceeded_exits_2(self, tmp_path):
+        with pytest.raises(SystemExit) as ei:
+            self._run_main(tmp_path, ["--max-failures", "1"], lambda *a, **kw: "failed")
+        assert ei.value.code == 2
+
+    def test_max_failures_not_exceeded_exits_0(self, tmp_path):
+        self._run_main(tmp_path, ["--max-failures", "2"], lambda *a, **kw: "failed")
+
+    def test_keep_work_dir_passed_through(self, tmp_path):
+        seen = []
+
+        def fake(*a, **kw):
+            seen.append(kw["keep_work_dir"])
+            return "archived"
+
+        self._run_main(tmp_path, ["--keep-work-dir"], fake)
+        assert seen == [True, True]
 
 
 # ---------------------------------------------------------------------------
