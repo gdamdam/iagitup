@@ -80,6 +80,15 @@ def _fetch_gitlab(owner: str, repo: str, host: str) -> dict | None:
     data = _get_json(url, headers)
     if data is None:
         return None
+    return map_gitlab_project(data, host, owner, url)
+
+
+def map_gitlab_project(data: dict, host: str, owner: str, url: str = "") -> dict | None:
+    """Map a GitLab project JSON object to the GitHub-shaped dict, or None.
+
+    Shared by single-repo lookup and owner listing so both produce identical
+    shapes.  *url* is only used in the log message on a malformed response.
+    """
     try:
         ns = data.get("namespace") or {}
         avatar = data.get("avatar_url") or ns.get("avatar_url")
@@ -116,6 +125,14 @@ def _fetch_gitea(owner: str, repo: str, host: str) -> dict | None:
     data = _get_json(url)
     if data is None:
         return None
+    return map_gitea_repo(data, host, url)
+
+
+def map_gitea_repo(data: dict, host: str, url: str = "") -> dict | None:
+    """Map a Gitea/Forgejo repo JSON object to the GitHub-shaped dict, or None.
+
+    Shared by single-repo lookup and owner listing.
+    """
     try:
         own = data["owner"]
         pushed_at = _normalise_ts(data.get("updated_at"))

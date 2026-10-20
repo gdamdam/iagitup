@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.0] - 2026-10-20
+
+### Added
+
+- **Archive every repository of a user or organization** (GitHub, GitLab, Gitea/Forgejo/Codeberg, including self-hosted), new `iagitup/owners.py`.
+  - `archive-watchlist --owner URL_OR_NAME` with `--include-forks`, `--skip-archived` and `--max-repos N` (keeps the most recently pushed). Forks are skipped by default.
+  - `iagitup https://github.com/<owner>` detects a user/organization URL and delegates to the above (without a state file).
+- `archive-watchlist --releases`, `--issues`, `--submodules` pass the per-repo extras through in both top-starred and owner mode.
+- `archive-watchlist --no-state` skips the local state file; the IA duplicate check still prevents re-uploads.
+
+### Changed
+
+- `archive-watchlist` subject tags use the repo's platform label instead of always `GitHub`; `github_rank` is only set in top-starred mode.
+- State-file keys for non-GitHub repos are prefixed with the host (`gitlab.com/owner/repo`); GitHub keys are unchanged, so existing state files keep working.
+- `platforms.py` exposes `map_gitlab_project` and `map_gitea_repo`.
+
 ## [3.7.1] - 2026-10-20
 
 ### Changed

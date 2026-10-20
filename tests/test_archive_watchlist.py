@@ -578,3 +578,157 @@ class TestStateLocking:
             archive_repo(SAMPLE_REPO, 1, "acc", "sec", state, dry_run=False)
         assert state.locked_at_write is True
         assert not _state_lock.locked()  # released afterwards
+
+
+# ---------------------------------------------------------------------------
+# Owner mode, extras, state keys
+# ---------------------------------------------------------------------------
+
+def _run_owner_main(argv, repos=None, **extra_patches):
+    from iagitup.archive_watchlist import main
+    repos = [SAMPLE_REPO] if repos is None else repos
+    with patch("iagitup.archive_watchlist.fetch_owner_repos", return_value=repos) as owner, \
+         patch("iagitup.archive_watchlist.fetch_top_repos") as top, \
+         patch("iagitup.archive_watchlist.load_state", return_value={}) as load, \
+         patch("iagitup.archive_watchlist.save_state") as save, \
+         patch("iagitup.archive_watchlist.get_ia_credentials", return_value=("a", "b")), \
+         patch("iagitup.archive_watchlist.archive_repo", return_value="archived") as arch:
+        main(argv)
+    return owner, top, load, save, arch
+
+
+class TestOwnerMode:
+    def test_uses_fetch_owner_repos_not_top(self):
+        owner, top, _, _, arch = _run_owner_main(
+            ["--owner", "torvalds", "--include-forks", "--skip-archived", "--max-repos", "5"]
+        )
+        owner.assert_called_once_with("torvalds", include_forks=True, skip_archived=True, max_repos=5)
+        top.assert_not_called()
+        assert arch.call_args.kwargs["include_rank"] is False
+
+    def test_top_mode_still_includes_rank_and_defaults_top_100(self):
+        from iagitup.archive_watchlist import main
+        with patch("iagitup.archive_watchlist.fetch_top_repos", return_value=[SAMPLE_REPO]) as top, \
+             patch("iagitup.archive_watchlist.load_state", return_value={}), \
+             patch("iagitup.archive_watchlist.save_state"), \
+             patch("iagitup.archive_watchlist.get_ia_credentials", return_value=("a", "b")), \
+             patch("iagitup.archive_watchlist.archive_repo", return_value="archived") as arch:
+            main([])
+        assert top.call_args.args[0] == 100
+        assert arch.call_args.kwargs["include_rank"] is True
+
+    @pytest.mark.parametrize("flags", [
+        ["--top", "5"], ["--days", "3"], ["--since", "2025-01-01"], ["--until", "2025-01-01"],
+    ])
+    def test_owner_rejects_top_mode_flags(self, flags):
+        from iagitup.archive_watchlist import main
+        with pytest.raises(SystemExit, match="2"):
+            main(["--owner", "x", *flags])
+
+    @pytest.mark.parametrize("flags", [["--include-forks"], ["--skip-archived"], ["--max-repos", "3"]])
+    def test_owner_flags_require_owner(self, flags):
+        from iagitup.archive_watchlist import main
+        with pytest.raises(SystemExit, match="2"):
+            main(flags)
+
+    def test_owner_error_exits_1(self):
+        from iagitup.archive_watchlist import main
+        with patch("iagitup.archive_watchlist.fetch_owner_repos", side_effect=IagitupError("nope")), \
+             patch("iagitup.archive_watchlist.get_ia_credentials", return_value=("a", "b")), \
+             patch("iagitup.archive_watchlist.load_state", return_value={}):
+            with pytest.raises(SystemExit, match="1"):
+                main(["--owner", "x"])
+
+    def test_no_state_never_loads_or_saves(self):
+        _, _, load, save, arch = _run_owner_main(["--owner", "x", "--no-state"])
+        load.assert_not_called()
+        save.assert_not_called()
+        assert arch.call_args.args[4] == {}
+
+    def test_state_saved_by_default(self):
+        _, _, load, save, _ = _run_owner_main(["--owner", "x"])
+        load.assert_called_once()
+        save.assert_called_once()
+
+    def test_extras_flags_forwarded(self):
+        *_, arch = _run_owner_main(["--owner", "x", "--releases", "--issues", "--submodules"])
+        kw = arch.call_args.kwargs
+        assert kw["releases"] and kw["issues"] and kw["submodules"]
+
+
+class TestStateKeyAndMeta:
+    def test_non_github_state_key_prefixed(self, tmp_path):
+        repo = {**SAMPLE_REPO, "full_name": "g/p", "_platform": "gitlab.com"}
+        folder = tmp_path / "tmpX" / "repo"
+        folder.mkdir(parents=True)
+        state = {}
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", return_value=("id", {}, "b")):
+            archive_repo(repo, 1, "a", "s", state, dry_run=False)
+        assert list(state) == ["gitlab.com/g/p"]
+        # Second run: the prefixed key drives the local skip.
+        assert archive_repo(repo, 1, "a", "s", state, dry_run=False) == "skipped"
+
+    def test_rank_none_omits_github_rank(self):
+        assert "github_rank" not in build_custom_meta(SAMPLE_REPO, rank=None)
+
+    def test_subject_uses_platform_label(self):
+        assert build_custom_meta({**SAMPLE_REPO, "_platform": "gitlab.com"}, 1)["subject"].startswith("GitLab;")
+        assert build_custom_meta({**SAMPLE_REPO, "_platform": "git.example.org"}, 1)["subject"].startswith(
+            "git.example.org;"
+        )
+        assert build_custom_meta(SAMPLE_REPO, 1)["subject"].startswith("GitHub;")
+
+    def test_include_rank_false_omits_rank_in_upload(self, tmp_path):
+        folder = tmp_path / "tmpX" / "repo"
+        folder.mkdir(parents=True)
+        with patch("iagitup.archive_watchlist.find_existing_item", return_value=None), \
+             patch("iagitup.archive_watchlist.repo_download", return_value=({}, folder)), \
+             patch("iagitup.archive_watchlist.upload_ia", return_value=("id", {}, "b")) as up:
+            archive_repo(SAMPLE_REPO, 7, "a", "s", {}, dry_run=False, include_rank=False)
+        assert "github_rank" not in up.call_args.kwargs["custom_meta"]
+
+
+class TestArchiveRepoExtras:
+    def _archive(self, tmp_path, repo=SAMPLE_REPO, **kw):
+        folder = tmp_path / "tmpX" / "repo"
+        folder.mkdir(parents=True)
+        p = "iagitup.archive_watchlist."
+        with patch(p + "find_existing_item", return_value=None), \
+             patch(p + "repo_download", return_value=({}, folder)) as dl, \
+             patch(p + "_item_names", return_value=("id", "stem", None)), \
+             patch(p + "create_submodule_bundles", return_value=[folder / "s.bundle"]) as sub, \
+             patch(p + "fetch_releases", return_value=[folder / "rel.json"]) as rel, \
+             patch(p + "fetch_issues", return_value=[folder / "iss.json"]) as iss, \
+             patch(p + "upload_ia", return_value=("id", {}, "stem")) as up:
+            archive_repo(repo, 1, "a", "s", {}, dry_run=False, **kw)
+        return dl, sub, rel, iss, up, folder
+
+    def test_defaults_call_no_extras(self, tmp_path):
+        dl, sub, rel, iss, up, _ = self._archive(tmp_path)
+        sub.assert_not_called()
+        rel.assert_not_called()
+        iss.assert_not_called()
+        assert up.call_args.kwargs["extra_files"] is None
+        assert dl.call_args.kwargs["submodules"] is False
+
+    def test_all_extras_on_github(self, tmp_path):
+        dl, sub, rel, iss, up, folder = self._archive(
+            tmp_path, releases=True, issues=True, submodules=True
+        )
+        assert dl.call_args.kwargs["submodules"] is True
+        sub.assert_called_once_with(folder, "stem")
+        rel.assert_called_once_with(SAMPLE_REPO, folder.parent)
+        iss.assert_called_once_with(SAMPLE_REPO, folder.parent)
+        assert len(up.call_args.kwargs["extra_files"]) == 3
+
+    def test_releases_issues_skipped_off_github(self, tmp_path):
+        repo = {**SAMPLE_REPO, "_platform": "gitlab.com"}
+        _, sub, rel, iss, up, _ = self._archive(
+            tmp_path, repo=repo, releases=True, issues=True, submodules=True
+        )
+        rel.assert_not_called()
+        iss.assert_not_called()
+        sub.assert_called_once()  # submodules are platform-agnostic
+        assert len(up.call_args.kwargs["extra_files"]) == 1

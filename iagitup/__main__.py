@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 from iagitup.github_extras import fetch_issues, fetch_releases
+from iagitup.owners import parse_owner_url
 from iagitup.iagitup import (
     IagitupError,
     __version__,
@@ -94,12 +95,58 @@ def main() -> None:
         "--issues", action="store_true",
         help="Also archive GitHub issues and pull requests (GitHub only).",
     )
+    parser.add_argument(
+        "--include-forks", action="store_true",
+        help="Owner URL only: also archive forked repos.",
+    )
+    parser.add_argument(
+        "--skip-archived", action="store_true",
+        help="Owner URL only: skip archived repos.",
+    )
+    parser.add_argument(
+        "--max-repos", type=int, default=None, metavar="N",
+        help="Owner URL only: archive only the N most recently pushed repos.",
+    )
     parser.add_argument("--version", "-v", action="version", version=__version__)
     parser.add_argument(
         "repo_url", type=str,
-        help="Git repository URL to archive (GitHub, GitLab, Bitbucket, or any HTTPS git URL)",
+        help="Git repository URL to archive (GitHub, GitLab, Bitbucket, or any HTTPS git URL). "
+             "A user/organization URL such as https://github.com/torvalds archives all its repos.",
     )
     args = parser.parse_args()
+
+    # Only full URLs count: a bare word is too ambiguous for a positional
+    # (archive-watchlist --owner accepts bare names).  Imported lazily because
+    # archive_watchlist imports from iagitup.iagitup like this module does.
+    if "://" in args.repo_url and parse_owner_url(args.repo_url) is not None:
+        if args.resume or args.metadata:
+            print(
+                "Error: --resume and --metadata cannot be used with a user/organization URL.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        from iagitup import archive_watchlist
+
+        print(f":: {args.repo_url} is a user/organization — archiving all its repositories ...")
+        argv = ["--owner", args.repo_url, "--no-state"]
+        if args.dry_run:
+            argv.append("--dry-run")
+        if args.work_dir:
+            argv += ["--work-dir", args.work_dir]
+        for flag in ("keep_work_dir", "releases", "issues", "submodules",
+                     "include_forks", "skip_archived"):
+            if getattr(args, flag):
+                argv.append("--" + flag.replace("_", "-"))
+        if args.max_repos is not None:
+            argv += ["--max-repos", str(args.max_repos)]
+        sys.exit(archive_watchlist.main(argv))
+
+    if args.include_forks or args.skip_archived or args.max_repos is not None:
+        print(
+            "Error: --include-forks/--skip-archived/--max-repos need a user/organization URL.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     # Dry-run never touches IA, so skip credentials (which may prompt).
     s3_access = s3_secret = ""

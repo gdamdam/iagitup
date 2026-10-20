@@ -1,7 +1,7 @@
 <h1 align="center">iagitup</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.7.1-blue?style=flat" alt="Version 3.7.1">
+  <img src="https://img.shields.io/badge/version-3.8.0-blue?style=flat" alt="Version 3.8.0">
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/v/iagitup?style=flat&cache_seconds=0" alt="PyPI version"></a>
   <a href="https://pypi.org/project/iagitup/"><img src="https://img.shields.io/pypi/pyversions/iagitup?style=flat&cache_seconds=0" alt="Python versions"></a>  <a href="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml"><img src="https://github.com/gdamdam/iagitup/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/pypi/l/iagitup?style=flat&cache_seconds=0" alt="License: GPLv3"></a>
@@ -67,6 +67,7 @@ archive-watchlist --dry-run --top 10          # preview
 archive-watchlist --workers 8                 # top 100, all-time
 archive-watchlist --days 7                    # trending this week
 archive-watchlist --since 2025-01-01 --until 2025-06-30
+archive-watchlist --owner torvalds --skip-archived --max-repos 20   # all repos of a user/org
 ```
 
 ---
@@ -87,6 +88,12 @@ archive-watchlist --since 2025-01-01 --until 2025-06-30
 | `--resume PATH` | Upload from a kept clone instead of cloning again |
 | `-v, --version` | Print version |
 
+A user/organization URL (exactly one path segment) archives all its repos via `archive-watchlist --owner`; `--include-forks`, `--skip-archived` and `--max-repos N` apply, `--resume`/`--metadata` do not.
+
+```bash
+iagitup --skip-archived https://github.com/torvalds
+```
+
 Resume an interrupted upload:
 
 ```bash
@@ -103,6 +110,14 @@ iagitup --resume /tmp/tmpabc123/repo https://github.com/user/repo
 | `--days N` | all-time | Only repos created in the last N days |
 | `--since DATE` | | Only repos created on or after `YYYY-MM-DD` |
 | `--until DATE` | | Only repos created on or before `YYYY-MM-DD` |
+| `--owner URL_OR_NAME` | | Archive all repos of a user/org (GitHub, GitLab, Gitea/Codeberg) instead of the top-starred; excludes `--top/--days/--since/--until` |
+| `--include-forks` | | With `--owner`: include forks |
+| `--skip-archived` | | With `--owner`: skip archived repos |
+| `--max-repos N` | | With `--owner`: only the N most recently pushed repos |
+| `--releases` | | Archive release notes and assets (GitHub only) |
+| `--issues` | | Archive issues and pull requests (GitHub only) |
+| `--submodules` | | Upload one bundle per submodule |
+| `--no-state` | | Do not read or write the state file (IA duplicate check still applies) |
 | `--max-size MB` | no limit | Skip repos larger than this |
 | `--workers N` | 4 | Parallel uploads |
 | `--dry-run` | | Preview only |

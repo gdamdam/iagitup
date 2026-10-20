@@ -25,6 +25,7 @@ Usage:
     python archive_watchlist.py --json-summary run.json --max-failures 3  # cron monitoring
     python archive_watchlist.py --keep-work-dir                     # keep clones for --resume
     python archive_watchlist.py --dry-run        # preview without uploading
+    python archive_watchlist.py --owner torvalds --skip-archived    # every repo of a user/org
     python archive_watchlist.py --state-file /path/to/state.json
 
 Cron example (daily at 03:00):
@@ -49,11 +50,16 @@ from iagitup.iagitup import (
     IagitupError,
     __version__,
     _github_headers,
+    _item_names,
+    _platform_label,
+    create_submodule_bundles,
     find_existing_item,
     get_ia_credentials,
     repo_download,
     upload_ia,
 )
+from iagitup.github_extras import fetch_issues, fetch_releases
+from iagitup.owners import fetch_owner_repos
 
 log = logging.getLogger(__name__)
 
@@ -229,7 +235,19 @@ def fetch_top_repos(
 # Metadata
 # ---------------------------------------------------------------------------
 
-def build_custom_meta(repo_data: dict, rank: int) -> dict:
+def _state_key(repo_data: dict) -> str:
+    """State-file key: bare ``full_name`` for GitHub, ``platform/full_name`` otherwise.
+
+    GitHub keeps the bare name so state files written before multi-platform
+    support stay valid.
+    """
+    platform = repo_data.get("_platform", "github.com")
+    if platform == "github.com":
+        return repo_data["full_name"]
+    return f"{platform}/{repo_data['full_name']}"
+
+
+def build_custom_meta(repo_data: dict, rank: int | None) -> dict:
     """Build the extra IA metadata fields derived from GitHub popularity data.
 
     These fields are merged (via ``custom_meta``) into the default iagitup
@@ -237,7 +255,8 @@ def build_custom_meta(repo_data: dict, rank: int) -> dict:
 
     Args:
         repo_data: Raw repository dict from the GitHub API.
-        rank: 1-based position in the top-N list at the time of archiving.
+        rank: 1-based position in the top-N list at the time of archiving, or
+            ``None`` (owner mode) to omit ``github_rank``.
 
     Returns:
         Dict of additional IA metadata fields.
@@ -248,20 +267,22 @@ def build_custom_meta(repo_data: dict, rank: int) -> dict:
 
     # Extend the default iagitup subject tags with the primary language and
     # user-defined topics so the IA item is more discoverable in search.
-    subject_parts = ["GitHub", "code", "software", "git"]
+    subject_parts = [_platform_label(repo_data.get("_platform", "github.com")), "code", "software", "git"]
     if language:
         subject_parts.append(language)
     subject_parts.extend(topics)
 
-    return {
+    meta = {
         "stars_count": str(repo_data.get("stargazers_count", "")),
         "forks_count": str(repo_data.get("forks_count", "")),
         "watchers_count": str(repo_data.get("watchers_count", "")),
         "language": language,
         "topics": ";".join(topics),
-        "github_rank": str(rank),
         "subject": ";".join(subject_parts),
     }
+    if rank is not None:
+        meta["github_rank"] = str(rank)
+    return meta
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +303,10 @@ def archive_repo(
     failures: list | None = None,
     failures_lock: "threading.Lock | None" = None,
     keep_work_dir: bool = False,
+    releases: bool = False,
+    issues: bool = False,
+    submodules: bool = False,
+    include_rank: bool = True,
 ) -> str:
     """Download and archive a single repository, updating the state on success.
 
@@ -310,13 +335,19 @@ def archive_repo(
             share one list).  A module-level lock is used if omitted.
         keep_work_dir: When True, leave the temp clone on disk and log its
             path so the run can be resumed with the main CLI's ``--resume``.
+        releases: Also archive release notes/assets (GitHub only).
+        issues: Also archive issues and pull requests (GitHub only).
+        submodules: Also clone submodules and upload each as an extra bundle.
+        include_rank: When False (owner mode) ``rank`` is only used for log
+            formatting and ``github_rank`` is left out of the IA metadata.
 
     Returns:
         ``"skipped"``, ``"archived"``, or ``"failed"``.
     """
     full_name = repo_data["full_name"]
     pushed_at = repo_data["pushed_at"]
-    cached = state.get(full_name, {})
+    key = _state_key(repo_data)
+    cached = state.get(key, {})
 
     # Local skip: repo hasn't been pushed to since last run.
     if cached.get("pushed_at") == pushed_at:
@@ -324,7 +355,7 @@ def archive_repo(
         return "skipped"
 
     stars = repo_data.get("stargazers_count", 0)
-    reason = "new" if full_name not in state else "updated"
+    reason = "new" if key not in state else "updated"
     prefix = "DRY-RUN" if dry_run else "ARCHIVE"
     log.info(f"  {prefix} [{rank:>3}] {full_name} ({stars:,} ★) [{reason}]")
 
@@ -344,20 +375,33 @@ def archive_repo(
             # GitHub API a second time for metadata we already have.
             _, repo_folder = repo_download(
                 repo_data["html_url"], work_dir=work_dir, repo_data=repo_data,
+                submodules=submodules,
             )
-            custom_meta = build_custom_meta(repo_data, rank)
+            extra_files: list[Path] = []
+            if submodules:
+                extra_files += create_submodule_bundles(repo_folder, _item_names(repo_data)[1])
+            if releases or issues:
+                if repo_data.get("_platform", "github.com") == "github.com":
+                    if releases:
+                        extra_files += fetch_releases(repo_data, repo_folder.parent)
+                    if issues:
+                        extra_files += fetch_issues(repo_data, repo_folder.parent)
+                else:
+                    log.debug(f"           --releases/--issues are GitHub-only; skipping for {full_name}.")
+            custom_meta = build_custom_meta(repo_data, rank if include_rank else None)
             identifier, _, _ = upload_ia(
                 repo_folder,
                 repo_data,
                 s3_access=s3_access,
                 s3_secret=s3_secret,
                 custom_meta=custom_meta,
+                extra_files=extra_files or None,
             )
             log.info(f"           → https://archive.org/details/{identifier}")
 
         # Record the archive so future runs can skip this snapshot locally.
         with _state_lock:
-            state[full_name] = {
+            state[key] = {
                 "pushed_at": pushed_at,
                 "archived_at": datetime.now(timezone.utc).isoformat(),
                 "ia_identifier": identifier,
@@ -384,8 +428,11 @@ def archive_repo(
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    """Parse arguments, fetch the top repos, and archive them in parallel."""
+def main(argv: list[str] | None = None) -> None:
+    """Parse arguments, fetch the repos, and archive them in parallel.
+
+    ``argv`` lets ``iagitup <owner-url>`` delegate here programmatically.
+    """
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s :: %(message)s",
@@ -396,7 +443,9 @@ def main() -> None:
         description="Archive the top-N most-starred GitHub repos to the Internet Archive."
     )
     parser.add_argument(
-        "--top", type=int, default=100,
+        "--top", type=int, default=None,
+        # Default is resolved after parsing so explicit use can be detected
+        # (it conflicts with --owner).
         help=f"Number of top repositories to check (default: 100, max: {MAX_TOP_N}; fetched 100 per page).",
     )
     parser.add_argument(
@@ -444,11 +493,47 @@ def main() -> None:
         help="Keep temporary clone directories (path is logged) so a run can be resumed with iagitup --resume.",
     )
     parser.add_argument(
+        "--owner", type=str, default=None, metavar="URL_OR_NAME",
+        help="Archive all repos of a user/organization (bare name = GitHub) instead of the top-starred.",
+    )
+    parser.add_argument("--include-forks", action="store_true", help="With --owner: include forked repos.")
+    parser.add_argument("--skip-archived", action="store_true", help="With --owner: skip archived repos.")
+    parser.add_argument(
+        "--max-repos", type=int, default=None, metavar="N",
+        help="With --owner: only the N most recently pushed repos.",
+    )
+    parser.add_argument("--releases", action="store_true", help="Also archive release notes and assets (GitHub only).")
+    parser.add_argument("--issues", action="store_true", help="Also archive issues and pull requests (GitHub only).")
+    parser.add_argument("--submodules", action="store_true", help="Also upload each submodule as an extra bundle.")
+    parser.add_argument(
+        "--no-state", action="store_true",
+        help="Do not read or write the state file (the IA duplicate check still prevents re-uploads).",
+    )
+    parser.add_argument(
         "--version", "-v", action="version", version=__version__,
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    if args.top > MAX_TOP_N:
+    if args.owner is not None:
+        conflicting = [
+            f"--{f}" for f in ("top", "days", "since", "until") if getattr(args, f) is not None
+        ]
+        if conflicting:
+            parser.error(f"--owner cannot be combined with {', '.join(conflicting)}.")
+    else:
+        conflicting = [
+            flag for flag, val in (
+                ("--include-forks", args.include_forks),
+                ("--skip-archived", args.skip_archived),
+                ("--max-repos", args.max_repos is not None),
+            ) if val
+        ]
+        if conflicting:
+            parser.error(f"{', '.join(conflicting)} require --owner.")
+        if args.top is None:
+            args.top = 100
+
+    if args.top is not None and args.top > MAX_TOP_N:
         parser.error(f"--top cannot exceed {MAX_TOP_N} (GitHub Search API result limit).")
 
     if args.days is not None and (args.since or args.until):
@@ -486,8 +571,21 @@ def main() -> None:
             sys.exit(1)
 
     started_at = datetime.now(timezone.utc)
-    state = load_state(args.state_file)
-    repos = fetch_top_repos(args.top, days=args.days, since=args.since, until=args.until)
+    # --no-state: an empty throwaway dict, never loaded from or saved to disk.
+    state = {} if args.no_state else load_state(args.state_file)
+    if args.owner is not None:
+        try:
+            repos = fetch_owner_repos(
+                args.owner,
+                include_forks=args.include_forks,
+                skip_archived=args.skip_archived,
+                max_repos=args.max_repos,
+            )
+        except IagitupError as exc:
+            log.error(f"Owner listing failed: {exc}")
+            sys.exit(1)
+    else:
+        repos = fetch_top_repos(args.top, days=args.days, since=args.since, until=args.until)
 
     if args.max_size is not None:
         max_kb = args.max_size * 1024
@@ -512,12 +610,14 @@ def main() -> None:
             work_dir=work_dir,
             failures=failures, failures_lock=counts_lock,
             keep_work_dir=args.keep_work_dir,
+            releases=args.releases, issues=args.issues, submodules=args.submodules,
+            include_rank=args.owner is None,
         )
         with counts_lock:
             counts[result] += 1
         # Persist state only when something changed (not on skips) to reduce
         # unnecessary disk I/O; also ensures progress survives a mid-run crash.
-        if not args.dry_run and result != "skipped":
+        if not args.dry_run and not args.no_state and result != "skipped":
             with _state_lock:
                 save_state(args.state_file, state)
         return result

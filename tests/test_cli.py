@@ -175,3 +175,72 @@ class TestExtras:
             )
         assert up.call_args.kwargs["extra_files"] is None
         assert "GitHub-only" in capsys.readouterr().err
+
+
+class TestOwnerUrl:
+    OWNER = "https://github.com/torvalds"
+
+    def _delegate(self, argv):
+        with patch("sys.argv", ["iagitup", *argv]), \
+             patch("iagitup.archive_watchlist.main", return_value=None) as wl:
+            with pytest.raises(SystemExit) as exc:
+                main()
+        return wl, exc.value.code
+
+    def test_delegates_with_minimal_argv(self, capsys):
+        wl, code = self._delegate([self.OWNER])
+        wl.assert_called_once_with(["--owner", self.OWNER, "--no-state"])
+        assert code is None
+        assert "is a user/organization" in capsys.readouterr().out
+
+    def test_forwards_all_flags(self):
+        wl, _ = self._delegate([
+            "--dry-run", "--work-dir", "/w", "--keep-work-dir", "--releases", "--issues",
+            "--submodules", "--include-forks", "--skip-archived", "--max-repos", "3",
+            self.OWNER + "/",
+        ])
+        argv = wl.call_args.args[0]
+        assert argv[:3] == ["--owner", self.OWNER + "/", "--no-state"]
+        for flag in ("--dry-run", "--keep-work-dir", "--releases", "--issues", "--submodules",
+                     "--include-forks", "--skip-archived"):
+            assert flag in argv
+        assert argv[argv.index("--work-dir") + 1] == "/w"
+        assert argv[argv.index("--max-repos") + 1] == "3"
+
+    def test_propagates_exit_code(self):
+        with patch("sys.argv", ["iagitup", self.OWNER]), \
+             patch("iagitup.archive_watchlist.main", return_value=2):
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 2
+
+    @pytest.mark.parametrize("flags", [["--resume", "/x"], ["--metadata", "a:b"]])
+    def test_resume_and_metadata_rejected(self, flags, capsys):
+        wl, code = self._delegate([*flags, self.OWNER])
+        wl.assert_not_called()
+        assert code == 2
+        assert "cannot be used" in capsys.readouterr().err
+
+    def test_bare_name_is_not_an_owner(self):
+        with patch("iagitup.archive_watchlist.main") as wl:
+            _run(
+                ["--dry-run", "torvalds"],
+                fetch_repo_metadata={"return_value": REPO_DATA},
+                upload_ia={"return_value": ("id", {}, "stem")},
+            )
+        wl.assert_not_called()
+
+    def test_repo_url_path_unchanged(self):
+        with patch("iagitup.archive_watchlist.main") as wl:
+            _run(
+                ["--dry-run", GH],
+                fetch_repo_metadata={"return_value": REPO_DATA},
+                upload_ia={"return_value": ("id", {}, "stem")},
+            )
+        wl.assert_not_called()
+
+    def test_owner_flags_rejected_for_repo_url(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _run(["--skip-archived", GH])
+        assert exc.value.code == 2
+        assert "need a user/organization URL" in capsys.readouterr().err
