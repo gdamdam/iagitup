@@ -294,8 +294,12 @@ def repo_download(
         # "--" stops git from parsing a URL that starts with "-" as an
         # option, and GIT_TERMINAL_PROMPT=0 makes a private or missing repo
         # fail fast instead of hanging on a credential prompt (cron-safe).
+        clone_cmd = ["git", "clone", "--progress"]
+        if submodules:
+            clone_cmd.append("--recurse-submodules")
+        clone_cmd += ["--", clone_url, str(repo_folder)]
         subprocess.check_call(
-            ["git", "clone", "--progress", "--", clone_url, str(repo_folder)],
+            clone_cmd,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
     except subprocess.CalledProcessError as exc:
@@ -440,19 +444,92 @@ def create_bundle(repo_folder: Path, bundle_name: str) -> Path:
     except subprocess.CalledProcessError as exc:
         raise BundleError(f"git bundle failed in {repo_folder}: {exc}") from exc
 
+    # Catch a corrupt bundle now, before it is uploaded and the clone deleted.
+    verify_bundle(bundle_path, cwd=repo_folder)
     return bundle_path
 
 
-def create_submodule_bundles(repo_folder: Path, bundle_stem: str) -> list[Path]:
-    """Create one ``git bundle`` per initialised submodule of *repo_folder*.
+def verify_bundle(bundle_path: Path, cwd: Path | None = None) -> None:
+    """Run ``git bundle verify`` on *bundle_path*.
 
-    Bundles are written under ``repo_folder.parent / "submodules"`` and named
-    ``{bundle_stem}_submodule_{path-with-dashes}.bundle``.  Submodules that
-    were not checked out (e.g. clone without ``submodules=True``) are skipped
-    with a warning.  Returns the list of created bundle paths (may be empty).
+    Args:
+        bundle_path: Path to the ``.bundle`` file.
+        cwd: Directory to run git in (defaults to the bundle's directory,
+            which is the repo for bundles created by ``create_bundle``).
+
+    Raises:
+        BundleError: With git's stderr if verification fails.
     """
-    # TODO(feature-6): implemented by the submodules agent.
-    return []
+    result = subprocess.run(
+        ["git", "bundle", "verify", str(bundle_path)],
+        cwd=cwd or bundle_path.parent,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise BundleError(
+            f"git bundle verify failed for {bundle_path.name}: "
+            f"{result.stderr.strip()}"
+        )
+
+
+def create_submodule_bundles(repo_folder: Path, bundle_stem: str) -> list[Path]:
+    """Bundle each checked-out submodule of *repo_folder* separately.
+
+    Submodule objects are not part of the parent bundle, so each one gets its
+    own bundle in ``repo_folder.parent / "submodules"`` (outside the repo so
+    ``upload_ia`` groups them under ``submodules/`` on IA).  The top-level
+    ``.gitmodules`` is copied alongside to record the path-to-URL mapping
+    needed to restore.  A single bad submodule is skipped, never fatal.
+
+    Returns:
+        Paths of created files; empty if the repo has no submodules.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "submodule", "--quiet", "foreach", "--recursive",
+             'echo "$displaypath"'],
+            cwd=repo_folder, capture_output=True, text=True, check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, OSError) as exc:
+        log.warning(f"Could not list submodules in {repo_folder}: {exc}")
+        return []
+
+    paths = [line.strip() for line in listing.splitlines() if line.strip()]
+    if not paths:
+        return []
+
+    dest_dir = repo_folder.parent / "submodules"
+    dest_dir.mkdir(exist_ok=True)
+    created: list[Path] = []
+
+    for displaypath in paths:
+        sub_dir = repo_folder / displaypath
+        if not (sub_dir / ".git").exists():
+            log.warning(f"Submodule {displaypath} is not checked out; skipping")
+            continue
+        dest = dest_dir / (
+            f"{bundle_stem}_submodule_{displaypath.replace('/', '-')}.bundle"
+        )
+        try:
+            subprocess.run(
+                ["git", "bundle", "create", str(dest), "--all"],
+                cwd=sub_dir, capture_output=True, text=True, check=True,
+            )
+            verify_bundle(dest, cwd=sub_dir)
+        except (subprocess.CalledProcessError, BundleError, OSError) as exc:
+            log.warning(f"Skipping submodule {displaypath}: bundle failed: {exc}")
+            dest.unlink(missing_ok=True)
+            continue
+        created.append(dest)
+
+    gitmodules = repo_folder / ".gitmodules"
+    if created and gitmodules.is_file():
+        mapping = dest_dir / f"{bundle_stem}_gitmodules.txt"
+        shutil.copyfile(gitmodules, mapping)
+        created.append(mapping)
+
+    return created
 
 
 # ---------------------------------------------------------------------------

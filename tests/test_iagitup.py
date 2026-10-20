@@ -26,9 +26,11 @@ from iagitup.iagitup import (
     create_bundle,
     fetch_repo_metadata,
     find_existing_item,
+    create_submodule_bundles,
     get_description_from_readme,
     get_ia_credentials,
     repo_download,
+    verify_bundle,
     upload_ia,
 )
 
@@ -1104,3 +1106,87 @@ class TestCliAlreadyArchived:
         mock_upload.assert_not_called()
         assert "already archived" in capsys.readouterr().out
         assert not fake_folder.parent.exists()  # temp dir still cleaned up
+
+
+def _init_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.check_call(["git", "init", "-q"], cwd=path)
+    subprocess.check_call(["git", "config", "user.email", "t@t.com"], cwd=path)
+    subprocess.check_call(["git", "config", "user.name", "T"], cwd=path)
+    (path / "f.txt").write_text("x")
+    subprocess.check_call(["git", "add", "."], cwd=path)
+    subprocess.check_call(["git", "commit", "-qm", "init"], cwd=path)
+
+
+def _add_submodule(repo: Path, src: Path, rel: str) -> None:
+    # file transport is blocked by default in modern git; allow for tests.
+    subprocess.check_call(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "add",
+         "-q", str(src), rel], cwd=repo,
+    )
+
+
+class TestVerifyBundle:
+    def test_valid_bundle_passes(self, tmp_path: Path):
+        repo = tmp_path / "r"
+        _init_repo(repo)
+        verify_bundle(create_bundle(repo, "b"))
+
+    def test_corrupt_bundle_raises(self, tmp_path: Path):
+        repo = tmp_path / "r"
+        _init_repo(repo)
+        bad = repo / "bad.bundle"
+        bad.write_text("not a bundle")
+        with pytest.raises(BundleError, match="verify failed"):
+            verify_bundle(bad)
+
+    def test_create_bundle_calls_verify(self, tmp_path: Path):
+        repo = tmp_path / "r"
+        _init_repo(repo)
+        with patch("iagitup.iagitup.verify_bundle") as mock_verify:
+            create_bundle(repo, "b")
+        mock_verify.assert_called_once()
+
+
+class TestCloneSubmodulesFlag:
+    def _clone_cmd(self, **kwargs) -> list[str]:
+        with patch("iagitup.iagitup.subprocess.check_call") as cc, \
+             patch("iagitup.iagitup._build_repo_data_from_clone", return_value={}):
+            repo_download("https://gitlab.com/o/r.git", **kwargs)
+        return cc.call_args[0][0]
+
+    def test_flag_added_when_enabled(self):
+        cmd = self._clone_cmd(submodules=True)
+        assert "--recurse-submodules" in cmd and "--progress" in cmd
+
+    def test_flag_absent_by_default(self):
+        assert "--recurse-submodules" not in self._clone_cmd()
+
+
+class TestCreateSubmoduleBundles:
+    def test_no_submodules_returns_empty(self, tmp_path: Path):
+        repo = tmp_path / "r"
+        _init_repo(repo)
+        assert create_submodule_bundles(repo, "s") == []
+
+    def test_bundles_submodule_and_gitmodules(self, tmp_path: Path):
+        sub = tmp_path / "subsrc"
+        _init_repo(sub)
+        root = tmp_path / "work"
+        repo = root / "r"
+        _init_repo(repo)
+        _add_submodule(repo, sub, "libs/sub")
+        result = create_submodule_bundles(repo, "stem")
+        names = sorted(p.name for p in result)
+        assert names == ["stem_gitmodules.txt", "stem_submodule_libs-sub.bundle"]
+        assert all(p.parent == root / "submodules" for p in result)
+
+    def test_unchecked_out_submodule_skipped(self, tmp_path: Path):
+        sub = tmp_path / "subsrc"
+        _init_repo(sub)
+        repo = tmp_path / "work" / "r"
+        _init_repo(repo)
+        _add_submodule(repo, sub, "sub")
+        # Remove the checkout marker so it looks uninitialised.
+        (repo / "sub" / ".git").unlink()
+        assert create_submodule_bundles(repo, "stem") == []
