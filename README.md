@@ -8,384 +8,184 @@
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/pypi/l/iagitup?style=flat&cache_seconds=0" alt="License: GPLv3"></a>
 </p>
 
-
 **Archive git repositories to the [Internet Archive](https://archive.org).**
 
-`iagitup` clones a git repository from GitHub, GitLab, Bitbucket, Codeberg, or any HTTPS git URL, creates a portable [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to the Internet Archive with rich metadata. GitHub, GitLab, Codeberg, and Gitea/Forgejo repos get full API metadata (description, avatar, wiki, star/fork counts); other hosts (e.g. Bitbucket) extract metadata from the local git history. If the repository has a wiki (GitHub, GitLab, Gitea/Forgejo), that is bundled and uploaded too. A companion command, `archive-watchlist`, continuously archives the most-starred repositories on GitHub -- either all-time, by recency (`--days`), or within a custom date range (`--since`/`--until`).
+`iagitup` clones a repository, packs it into a [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to archive.org with metadata.
+`archive-watchlist` does the same for the most-starred GitHub repos on a schedule.
 
 ---
 
 ## Features
 
-- **Multi-platform support** -- GitHub, GitLab, Bitbucket, Codeberg, self-hosted Gitea/Forgejo, and any HTTPS git URL.
-- **Full-fidelity snapshots** -- every branch, tag, and ref is preserved in a single git bundle.
-- **Git LFS support** -- LFS-enabled repos are detected automatically; large file objects are fetched and archived alongside the bundle.
-- **Wiki archiving** -- wiki repositories are detected and bundled automatically (GitHub, GitLab, Codeberg, Gitea/Forgejo).
-- **Rich IA metadata** -- description, README, topics, language, stars, and more are attached to each item. GitHub, GitLab, Codeberg, and self-hosted Gitea/Forgejo/GitLab get description, avatar, wiki, and star/fork counts via their APIs; other platforms extract metadata from git history. Set `GITLAB_TOKEN` to authenticate GitLab API calls (private projects, rate limits).
-- **Duplicate prevention** -- two layers (local state cache + IA item check) ensure the same snapshot is never uploaded twice.
-- **Bulk archiving** -- `archive-watchlist` fetches and archives the top-N most-starred GitHub repos on a schedule, with `--days`, `--since`, `--until`, and `--max-size` filters for trending repos.
-- **Parallel workers** -- configurable concurrency for bulk runs.
-- **Custom metadata** -- pass extra `key:value` pairs to enrich any upload.
+- **Any HTTPS git host** -- GitHub, GitLab, Bitbucket, Codeberg, self-hosted Gitea/Forgejo, or a plain URL.
+- **Complete snapshots** -- every branch, tag and ref in one verified bundle.
+- **Wikis, LFS, submodules** -- archived alongside the main bundle.
+- **Releases, issues, pull requests** -- optional GitHub exports, assets included.
+- **Rich metadata** -- description, README, avatar, stars and forks from the platform API.
+- **No duplicates** -- a snapshot is uploaded once; a new push creates a new item.
+- **Resumable** -- keep the clone and retry an interrupted upload without re-cloning.
+- **Bulk mode** -- top 1000 GitHub repos, date filters, parallel workers, JSON summaries.
 
 ---
 
 ## Installation
 
-### From PyPI
-
 ```bash
 pip install iagitup
 ```
 
-This installs two commands: **`iagitup`** and **`archive-watchlist`**.
+Installs two commands: `iagitup` and `archive-watchlist`.
 
-### From source
+Requirements:
 
-```bash
-git clone https://github.com/gdamdam/iagitup.git
-cd iagitup
-pip install .
-```
-
-### Prerequisites
-
-- Python **3.10, 3.11, 3.12, or 3.13**
-- `git` on `$PATH`
-- `git-lfs` on `$PATH` *(optional — needed to archive LFS objects; repos are still archived without it, but LFS pointers won't resolve)*
+- Python 3.10+
+- `git` on `$PATH` (`git-lfs` too, if you want LFS objects)
 - An [Internet Archive account](https://archive.org/account/login.createaccount.php)
-- **HTTPS URLs** are required (SSH `user@host:path` syntax is not supported)
-- For non-GitHub platforms, standard git authentication applies (credential helpers, `~/.netrc`, etc.)
+- HTTPS repository URLs (SSH syntax is not supported)
 
 ---
 
 ## Quick Start
 
-### Archive a single repository
-
 ```bash
-# GitHub
 iagitup https://github.com/torvalds/linux
-
-# GitLab
 iagitup https://gitlab.com/inkscape/inkscape
-
-# Bitbucket
-iagitup https://bitbucket.org/berkeleylab/upcxx
-
-# Codeberg
 iagitup https://codeberg.org/forgejo/forgejo
-
-# Any HTTPS git URL
-iagitup https://git.example.com/org/project
 ```
 
 ```
 :: Downloading https://github.com/torvalds/linux ...
-:: Cloning https://github.com/torvalds/linux.git ...
 :: Uploading bundle: torvalds-linux_-_2026-02-28_10-00-00.bundle
 :: Upload FINISHED.
-   Identifier:          github.com-torvalds-linux_-_2026-02-28_10-00-00
    Archived repository: https://archive.org/details/github.com-torvalds-linux_-_2026-02-28_10-00-00
    Git bundle:          https://archive.org/download/github.com-torvalds-linux_-_2026-02-28_10-00-00/torvalds-linux_-_2026-02-28_10-00-00.bundle
 ```
 
-### Bulk-archive top starred repos
+Bulk mode:
 
 ```bash
-# Preview the top 10 without uploading
-archive-watchlist --dry-run --top 10
-
-# Full run with 8 parallel workers
-archive-watchlist --workers 8
-
-# Archive the most-starred repos created in the last 7 days
-archive-watchlist --days 7
-
-# Archive repos created in a specific date range
+archive-watchlist --dry-run --top 10          # preview
+archive-watchlist --workers 8                 # top 100, all-time
+archive-watchlist --days 7                    # trending this week
 archive-watchlist --since 2025-01-01 --until 2025-06-30
-
-# Archive repos created since a specific date
-archive-watchlist --since 2025-06-01
-
-# Skip repos larger than 500 MB
-archive-watchlist --max-size 500
-
-# Preview trending repos from the last month
-archive-watchlist --days 30 --dry-run --top 20
 ```
 
 ---
 
 ## Usage
 
-### `iagitup`
+### `iagitup [options] <repo_url>`
 
-```bash
-iagitup [options] <repo_url>
-```
-
-| Flag | Short | Default | Description |
-|---|---|---|---|
-| `repo_url` | -- | *(required)* | Git repository URL to archive (GitHub, GitLab, Bitbucket, or any HTTPS git URL) |
-| `--metadata` | `-m` | -- | Custom metadata fields (see [Custom Metadata](#custom-metadata)) |
-| `--work-dir` | -- | system temp | Directory for temporary clones |
-| `--dry-run` | -- | off | Preview identifier, bundle URL and metadata without uploading; no credentials needed. GitHub repos are not cloned |
-| `--keep-work-dir` | -- | off | Never delete the temporary clone (on success or failure); its path is printed to stderr |
-| `--resume PATH` | -- | -- | Reuse a clone kept with `--keep-work-dir` instead of downloading again (implies `--keep-work-dir`). For GitHub repos metadata is re-fetched, so if the repo was pushed to since the clone, the identifier reflects the newer date |
-| `--submodules` | -- | off | Also clone submodules and upload each as an extra bundle |
-| `--releases` | -- | off | Also archive GitHub release notes and assets (GitHub only) |
-| `--issues` | -- | off | Also archive GitHub issues and pull requests (GitHub only) |
-| `--version` | `-v` | -- | Print version and exit |
+| Flag | Description |
+|---|---|
+| `-m, --metadata` | Extra metadata as `key:value,key2:value2` |
+| `--dry-run` | Print identifier and metadata, upload nothing. No credentials needed |
+| `--submodules` | Clone recursively and upload one bundle per submodule |
+| `--releases` | Archive release notes and assets (GitHub only) |
+| `--issues` | Archive issues and pull requests with comments (GitHub only) |
+| `--work-dir DIR` | Where to put temporary clones (default: system temp) |
+| `--keep-work-dir` | Keep the clone after the run and print its path |
+| `--resume PATH` | Upload from a kept clone instead of cloning again |
+| `-v, --version` | Print version |
 
 Resume an interrupted upload:
 
 ```bash
-# First attempt: keep the clone so a failed upload does not lose it
 iagitup --keep-work-dir https://github.com/user/repo
-# ... upload fails; stderr shows ":: Work directory kept: /tmp/tmpabc123/repo"
-
-# Retry without cloning again
+# ... fails; stderr shows ":: Work directory kept: /tmp/tmpabc123/repo"
 iagitup --resume /tmp/tmpabc123/repo https://github.com/user/repo
 ```
 
-### `archive-watchlist`
-
-```bash
-archive-watchlist [options]
-```
+### `archive-watchlist [options]`
 
 | Flag | Default | Description |
 |---|---|---|
-| `--top N` | `100` | Number of top repositories to fetch and check (max 1000; fetched 100 per page, paced at 2s per page without `GITHUB_TOKEN`) |
-| `--days N` | *(all-time)* | Only consider repos created within the last N days |
-| `--since DATE` | -- | Only consider repos created on or after DATE (YYYY-MM-DD) |
-| `--until DATE` | -- | Only consider repos created on or before DATE (YYYY-MM-DD) |
-| `--max-size MB` | *(no limit)* | Skip repos larger than this size in MB (based on GitHub's reported size) |
-| `--work-dir PATH` | system temp | Directory for temporary clones |
-| `--workers N` | `4` | Number of parallel archive workers |
-| `--dry-run` | off | Preview what would be archived -- no uploads, no state changes |
-| `--state-file PATH` | `./watchlist_state.json` | Path to the persistent state cache |
-| `--json-summary PATH` | -- | Write a JSON run summary (`started_at`, `finished_at`, `archived`, `skipped`, `failed`, `total_checked`, `dry_run`, `failures`) to PATH |
-| `--max-failures N` | *(no threshold)* | Exit with code 2 if more than N repos fail |
-| `--keep-work-dir` | off | Keep temporary clone directories (path is logged) so a run can be resumed with `iagitup --resume` |
-| `--version` / `-v` | -- | Print version and exit |
+| `--top N` | 100 | Repos to check, up to 1000 |
+| `--days N` | all-time | Only repos created in the last N days |
+| `--since DATE` | | Only repos created on or after `YYYY-MM-DD` |
+| `--until DATE` | | Only repos created on or before `YYYY-MM-DD` |
+| `--max-size MB` | no limit | Skip repos larger than this |
+| `--workers N` | 4 | Parallel uploads |
+| `--dry-run` | | Preview only |
+| `--state-file PATH` | `./watchlist_state.json` | Where the last-seen snapshots are recorded |
+| `--json-summary PATH` | | Write a run summary (counts, timings, failures) as JSON |
+| `--max-failures N` | | Exit with code 2 if more than N repos fail |
+| `--work-dir DIR` | system temp | Where to put temporary clones |
+| `--keep-work-dir` | | Keep clones for `iagitup --resume` |
 
-Examples:
+Cron, daily at 03:00:
 
-```bash
-# Use a custom state file
-archive-watchlist --state-file /var/lib/iagitup/state.json
-
-# Archive trending repos from the past week
-archive-watchlist --days 7
-
-# Archive repos from a date range with a custom state file
-archive-watchlist --since 2025-01-01 --until 2025-12-31 --state-file /var/lib/iagitup/state.json
-
-# Combine with top-n for a quick daily trending sweep
-archive-watchlist --days 1 --top 20 --dry-run
-
-# Go deep: top 500 repos (paginated), with a cron-friendly summary and failure threshold
-archive-watchlist --top 500 --json-summary /var/log/iagitup/summary.json --max-failures 5
-
-# Keep temp clones of failed/finished repos for debugging or --resume
-archive-watchlist --keep-work-dir
+```cron
+GITHUB_TOKEN=ghp_your_token_here
+0 3 * * * archive-watchlist --json-summary /var/log/watchlist.json >> watchlist.log 2>&1
 ```
 
 ---
 
 ## Configuration
 
-### GitHub Authentication (GitHub repos only)
+**Internet Archive credentials.** On first run you are asked to run `ia configure`. Keys are read from `~/.config/internetarchive/ia.ini`, `~/.ia` or `~/.config/ia.ini`. Get them at <https://archive.org/account/s3.php>.
 
-Unauthenticated GitHub API calls are rate-limited to **60 requests/hour**. Set `GITHUB_TOKEN` to raise this to **5,000/hour**:
+**`GITHUB_TOKEN`** raises the GitHub API limit from 60 to 5,000 requests per hour. No scopes needed for public repos. Get one at <https://github.com/settings/tokens>.
 
-```bash
-export GITHUB_TOKEN=ghp_your_token_here
-iagitup https://github.com/user/repo
-```
-
-Generate a token at <https://github.com/settings/tokens> -- no specific scopes are required for public repositories.
-
-### Internet Archive Credentials
-
-On first run, if no credentials are found, iagitup will prompt you to run `ia configure` interactively. Credentials are stored in `~/.ia` or `~/.config/ia.ini` and reused on subsequent runs.
-
-You can also configure them manually:
-
-```bash
-ia configure
-```
-
-Or create `~/.ia` directly:
-
-```ini
-[s3]
-access = YOUR_ACCESS_KEY
-secret = YOUR_SECRET_KEY
-```
-
-Find your keys at <https://archive.org/account/s3.php>.
+**`GITLAB_TOKEN`** authenticates GitLab API calls for private projects and higher limits.
 
 ---
 
-## Custom Metadata
+## What gets archived
 
-Pass additional Internet Archive metadata fields as comma-separated `key:value` pairs:
+Each snapshot is one IA item named `{host}-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}`, dated by the last push.
 
-```bash
-iagitup --metadata="subject:python;cli,creator:myorg" https://github.com/user/repo
-```
-
-Custom fields are **merged** into the default metadata. Any key that matches a default field will override it.
-
-### Default metadata fields
-
-| Field | Value |
+| File | When |
 |---|---|
-| `mediatype` | `software` |
-| `collection` | `open_source_software` |
-| `creator` | GitHub owner login |
-| `title` | IA item identifier |
-| `date` | Last push date (`YYYY-MM-DD`) |
-| `year` | Last push year |
-| `subject` | `{Platform};code;software;git` (e.g. `GitHub`, `GitLab`, `Bitbucket`) |
-| `originalurl` | Repository URL |
-| `pushed_date` | Full push timestamp (`YYYY-MM-DD HH:MM:SS`) |
-| `uploaded_with` | `iagitup-vX.X.X` |
-| `description` | HTML: repo description + README + restore instructions |
+| `<name>.bundle` | always |
+| `cover.jpg` | the platform reports an avatar |
+| `<name>_wiki.bundle` | the repo has a wiki |
+| `<name>_lfs.tar.gz` | the repo uses Git LFS |
+| `submodules/<name>_submodule_<path>.bundle` and `<name>_gitmodules.txt` | `--submodules` |
+| `releases/releases.json`, `releases/<tag>/<asset>` | `--releases` |
+| `issues.json`, `pulls.json` | `--issues` |
 
-### Extra fields added by `archive-watchlist`
-
-| Field | Value |
-|---|---|
-| `stars_count` | Stargazer count at time of archive |
-| `forks_count` | Fork count |
-| `watchers_count` | Watcher count |
-| `language` | Primary programming language |
-| `topics` | Semicolon-joined topic list |
-| `github_rank` | Position in the top-N list |
-| `subject` | Extended: base tags + language + topics |
+Item metadata: `title`, `date`, `year`, `creator`, `originalurl`, `pushed_date`, `subject` (`GitHub;code;software;git`), `stars_count`, `forks_count`, `has_lfs`, and an HTML `description` built from the repo description, README and restore instructions. `archive-watchlist` adds `language`, `topics`, `watchers_count` and `github_rank`. Fields passed with `--metadata` override these.
 
 ---
 
-## How It Works
+## How it works
 
-### Single repository (`iagitup`)
+1. Fetch metadata from the platform API, or from git history if there is none.
+2. Skip if that snapshot already exists on archive.org. For GitHub this happens before cloning.
+3. Clone, fetch the wiki, avatar and LFS objects, and any requested extras.
+4. Create and verify the bundles.
+5. Upload everything to one item.
 
-1. **Fetches metadata** -- for GitHub repos, from the GitHub API (`pushed_at`, description, owner, etc.); for GitLab and Gitea/Forgejo/Codeberg (including self-hosted), from their APIs; for any other host, or if the API is unreachable, from the local git history after cloning.
-2. **Checks for duplicates** -- the IA item identifier is derived from the platform hostname, repo name, and `pushed_at` timestamp (`{platform}-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS}`). If an item with that identifier already exists, iagitup exits early.
-3. **Clones the repository** in full (all branches and tags).
-4. **Downloads the owner's avatar** as a cover image (`cover.jpg`), concurrently with wiki cloning (skipped when the platform API provides no avatar).
-5. **Creates git bundles** (`git bundle create --all`) for the repository and, if present, the wiki.
-6. **Builds an HTML description** from the repo description, README (`.md` or `.txt`), and restore instructions.
-7. **Uploads** the bundle(s) and cover image to the Internet Archive.
-
-Each archived repository becomes a single IA item containing:
-
-| File | Description |
-|---|---|
-| `<bundle_name>.bundle` | Full git bundle (all branches + tags) |
-| `cover.jpg` | Repository owner's avatar |
-| `<bundle_name>_wiki.bundle` | Wiki git bundle *(if wiki exists)* |
-| `<bundle_name>_lfs.tar.gz` | Git LFS objects *(if repo uses LFS)* |
-
-### Bulk archiving (`archive-watchlist`)
-
-1. Fetches the top-N repos from the GitHub Search API (sorted by stars, optionally filtered by `--days`, `--since`, or `--until`).
-2. Compares each repo's `pushed_at` against a local state cache.
-3. **Skips** unchanged repos instantly (no network, no IA call).
-4. **Archives** new or updated repos via iagitup, enriched with popularity metadata.
-5. Repos are processed **in parallel** across a configurable worker pool.
-6. State is saved to disk after each archive -- a crash mid-run loses at most one item.
-
-#### Duplicate prevention
-
-Two independent layers prevent the same snapshot from being uploaded twice:
-
-| Layer | Where | How |
-|---|---|---|
-| **Local cache** | `archive_watchlist.py` | Compares `pushed_at` to the state file -- instant skip, zero network traffic |
-| **IA item check** | `iagitup.upload_ia` | Checks `item.exists` on IA before any heavy work -- safe even if the state file is deleted |
-
-A new push changes `pushed_at`, generates a new IA item identifier, and triggers a fresh archive -- preserving the full history of snapshots.
-
-#### Cron setup
-
-Add to your crontab (`crontab -e`) to run daily at 03:00:
-
-```cron
-0 3 * * * archive-watchlist >> watchlist.log 2>&1
-```
-
-Set `GITHUB_TOKEN` in the cron environment to avoid rate limiting:
-
-```cron
-GITHUB_TOKEN=ghp_your_token_here
-0 3 * * * archive-watchlist >> watchlist.log 2>&1
-```
-
-#### State file
-
-The state file (`watchlist_state.json`) tracks the last-seen snapshot of each repository:
-
-```json
-{
-  "owner/repo": {
-    "pushed_at": "2026-02-01T12:00:00Z",
-    "archived_at": "2026-02-02T03:00:00Z",
-    "ia_identifier": "github.com-owner-repo_-_2026-02-01_12-00-00",
-    "stars": 470000
-  }
-}
-```
-
-To force a re-archive of a specific repo, delete its entry from the file or change `pushed_at` to an old value.
+`archive-watchlist` also keeps a local state file of `pushed_at` per repo, so unchanged repos are skipped with no network calls. Delete a repo's entry to force a re-archive.
 
 ---
 
-## Restoring an Archived Repository
-
-1. Find the `.bundle` file in the archived IA item.
-2. Download it:
+## Restoring
 
 ```bash
-wget https://archive.org/download/<identifier>/<bundle>.bundle
+wget https://archive.org/download/<identifier>/<name>.bundle
+git clone <name>.bundle my-repo
 ```
 
-3. Clone from the bundle:
-
-```bash
-git clone <bundle>.bundle my-repo
-```
-
-All branches and tags are preserved in the bundle.
-
-### Restoring LFS objects
-
-If the archived item includes an `_lfs.tar.gz` file:
+LFS objects:
 
 ```bash
 cd my-repo
-wget https://archive.org/download/<identifier>/<bundle>_lfs.tar.gz
-mkdir -p .git/lfs
-tar -xzf <bundle>_lfs.tar.gz -C .git/
-git lfs install
-git lfs checkout
+wget https://archive.org/download/<identifier>/<name>_lfs.tar.gz
+tar -xzf <name>_lfs.tar.gz -C .git/
+git lfs install && git lfs checkout
 ```
+
+Submodules: clone each `submodules/*.bundle` into the path listed in `<name>_gitmodules.txt`.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or submit a pull request at <https://github.com/gdamdam/iagitup>.
-
-The project uses GitHub Actions and GitLab CI for automated testing across Python 3.10, 3.11, 3.12, and 3.13.
-
----
+Issues and pull requests are welcome at <https://github.com/gdamdam/iagitup>. Tests run on Python 3.10 to 3.13.
 
 ## License
 
-**GPLv3** -- Copyright (C) 2018-2026 Giovanni Damiola
-
-This program is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0) as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+GPLv3. Copyright (C) 2018-2026 Giovanni Damiola. See [LICENSE](LICENSE).
