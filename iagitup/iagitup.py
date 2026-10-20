@@ -35,6 +35,8 @@ import internetarchive
 import requests
 from markdown2 import markdown_path
 
+from iagitup.platforms import fetch_platform_metadata
+
 log = logging.getLogger(__name__)
 
 
@@ -196,24 +198,28 @@ def _build_repo_data_from_clone(
 # ---------------------------------------------------------------------------
 
 def fetch_repo_metadata(repo_url: str) -> dict | None:
-    """Fetch GitHub API metadata for *repo_url* without cloning anything.
+    """Fetch API metadata for *repo_url* without cloning anything.
 
-    Returns ``None`` for non-GitHub URLs, whose metadata can only be derived
-    from the clone itself.  Callers can use the result to check whether a
-    snapshot already exists on IA *before* paying for a clone.
+    GitHub uses the GitHub API (failures raise).  GitLab and Gitea/Forgejo/
+    Codeberg hosts use ``fetch_platform_metadata``; for those, and for any
+    other host, ``None`` means "derive metadata from the clone instead".
+    Callers can use the result to check whether a snapshot already exists on
+    IA *before* paying for a clone.
 
     Args:
         repo_url: The git repository URL.
 
     Returns:
-        GitHub API metadata dict (with ``_platform`` injected), or ``None``.
+        API metadata dict (with ``_platform`` injected), or ``None``.
 
     Raises:
-        RepoDownloadError: If the URL is invalid or the API call fails.
+        RepoDownloadError: If the URL is invalid or the GitHub API call fails.
     """
     owner, repo_name, hostname = _parse_repo_url(repo_url)
     if hostname != "github.com":
-        return None
+        # Best-effort: platform API failures return None rather than raising,
+        # since the clone-derived fallback still works.
+        return fetch_platform_metadata(repo_url)
 
     api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
     resp = requests.get(api_url, headers=_github_headers(), timeout=30)
@@ -748,6 +754,12 @@ def upload_ia(
     )
     if has_lfs:
         meta["has_lfs"] = "true"
+    # Star/fork counts come from the platform API (GitHub-shaped keys); set
+    # before custom_meta so watchlist-supplied values still win.
+    if repo_data.get("stargazers_count") is not None:
+        meta["stars_count"] = str(repo_data["stargazers_count"])
+    if repo_data.get("forks_count") is not None:
+        meta["forks_count"] = str(repo_data["forks_count"])
     if custom_meta:
         meta.update(custom_meta)
 

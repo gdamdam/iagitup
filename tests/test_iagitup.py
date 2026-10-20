@@ -996,7 +996,7 @@ class TestFetchRepoMetadata:
 
     def test_non_github_returns_none_without_api_call(self):
         with patch("iagitup.iagitup.requests.get") as mock_get:
-            assert fetch_repo_metadata("https://gitlab.com/o/r") is None
+            assert fetch_repo_metadata("https://bitbucket.org/o/r") is None
         mock_get.assert_not_called()
 
     def test_raises_on_api_error(self):
