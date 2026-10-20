@@ -233,6 +233,7 @@ def repo_download(
     repo_url: str,
     work_dir: Path | None = None,
     repo_data: dict | None = None,
+    submodules: bool = False,
 ) -> tuple[dict, Path]:
     """Download a git repository to a local temporary directory.
 
@@ -251,6 +252,8 @@ def repo_download(
         repo_data: Pre-fetched GitHub metadata (e.g. from
             ``fetch_repo_metadata`` or the Search API).  When given, the
             GitHub API is not called again.
+        submodules: When True, clone with ``--recurse-submodules`` so
+            submodule content is available for ``create_submodule_bundles``.
 
     Returns:
         Tuple of (metadata_dict, local_repo_path).
@@ -434,6 +437,18 @@ def create_bundle(repo_folder: Path, bundle_name: str) -> Path:
     return bundle_path
 
 
+def create_submodule_bundles(repo_folder: Path, bundle_stem: str) -> list[Path]:
+    """Create one ``git bundle`` per initialised submodule of *repo_folder*.
+
+    Bundles are written under ``repo_folder.parent / "submodules"`` and named
+    ``{bundle_stem}_submodule_{path-with-dashes}.bundle``.  Submodules that
+    were not checked out (e.g. clone without ``submodules=True``) are skipped
+    with a warning.  Returns the list of created bundle paths (may be empty).
+    """
+    # TODO(feature-6): implemented by the submodules agent.
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Git LFS helpers
 # ---------------------------------------------------------------------------
@@ -547,12 +562,28 @@ def find_existing_item(
     return (itemname, bundle_stem) if item.exists else None
 
 
+def _extra_key(path: Path, repo_folder: Path) -> str:
+    """Remote filename for an extra upload.
+
+    Files living under the mkdtemp root (``repo_folder.parent``) keep their
+    path relative to it (``releases/v1.0/app.zip``); anything else is
+    uploaded under its bare filename.
+    """
+    root = repo_folder.parent
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
 def upload_ia(
     repo_folder: Path,
     repo_data: dict,
     s3_access: str,
     s3_secret: str,
     custom_meta: dict | None = None,
+    extra_files: list[Path] | None = None,
+    dry_run: bool = False,
 ) -> tuple[str, dict, str]:
     """Upload the repository (and optional wiki) bundle to the Internet Archive.
 
@@ -579,6 +610,12 @@ def upload_ia(
         s3_secret: Internet Archive S3 secret key.
         custom_meta: Optional extra metadata fields merged into the IA item
             (overrides defaults on key collision).
+        extra_files: Additional local files to upload into the same item
+            after the main bundle (e.g. submodule bundles, release assets,
+            issue exports).  They are never deleted by this function.
+        dry_run: When True, compute the identifier and metadata but perform
+            no network I/O at all: no IA lookup, avatar, wiki, LFS fetch,
+            bundle, or upload.
 
     Returns:
         Tuple of (ia_item_identifier, metadata_dict, bundle_filename_stem).
@@ -603,19 +640,21 @@ def upload_ia(
     ia_bundle_url = (
         f"https://archive.org/download/{itemname}/{bundle_stem}.bundle"
     )
-    try:
-        session = internetarchive.get_session(
-            config={"s3": {"access": s3_access, "secret": s3_secret}}
-        )
-        item = session.get_item(itemname)
-    except Exception as exc:
-        raise UploadError(f"Failed to connect to Internet Archive: {exc}") from exc
+    item = None
+    if not dry_run:
+        try:
+            session = internetarchive.get_session(
+                config={"s3": {"access": s3_access, "secret": s3_secret}}
+            )
+            item = session.get_item(itemname)
+        except Exception as exc:
+            raise UploadError(f"Failed to connect to Internet Archive: {exc}") from exc
 
-    if item.exists:
-        log.warning("This repository snapshot is already archived.")
-        log.info(f"Archived URL: https://archive.org/details/{itemname}")
-        log.info(f"Bundle URL:   {ia_bundle_url}")
-        return itemname, {"title": itemname}, bundle_stem
+        if item.exists:
+            log.warning("This repository snapshot is already archived.")
+            log.info(f"Archived URL: https://archive.org/details/{itemname}")
+            log.info(f"Bundle URL:   {ia_bundle_url}")
+            return itemname, {"title": itemname}, bundle_stem
 
     # --- Concurrently download avatar + clone wiki (both are network I/O) ---
     cover_path: Path | None = None
@@ -623,27 +662,28 @@ def upload_ia(
     # Non-GitHub platforms have avatar_url=None; skip the download to avoid
     # passing None to requests.get().
     avatar_url = repo_data["owner"].get("avatar_url")
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        if avatar_url:
-            avatar_future = pool.submit(
-                _download_avatar,
-                avatar_url,
-                repo_folder / "cover.jpg",
+    if not dry_run:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            if avatar_url:
+                avatar_future = pool.submit(
+                    _download_avatar,
+                    avatar_url,
+                    repo_folder / "cover.jpg",
+                )
+            else:
+                avatar_future = None
+            wiki_future = pool.submit(
+                _download_wiki,
+                repo_data,
+                repo_folder.parent,  # wiki/ lands next to the main clone
             )
-        else:
-            avatar_future = None
-        wiki_future = pool.submit(
-            _download_wiki,
-            repo_data,
-            repo_folder.parent,  # wiki/ lands next to the main clone
-        )
-        cover_path = avatar_future.result() if avatar_future else None
-        wiki_folder = wiki_future.result()
+            cover_path = avatar_future.result() if avatar_future else None
+            wiki_folder = wiki_future.result()
 
     # --- Detect and fetch LFS objects ---
     has_lfs = _detect_lfs(repo_folder)
     lfs_archive_path: Path | None = None
-    if has_lfs:
+    if has_lfs and not dry_run:
         log.info("Git LFS detected — fetching LFS objects ...")
         lfs_archive_path = _fetch_and_archive_lfs(repo_folder, bundle_stem)
 
@@ -711,6 +751,10 @@ def upload_ia(
     if custom_meta:
         meta.update(custom_meta)
 
+    if dry_run:
+        log.info(f"DRY-RUN: would create item {itemname} — nothing uploaded.")
+        return itemname, meta, bundle_stem
+
     # --- Create the main git bundle ---
     try:
         bundle_file = create_bundle(repo_folder, bundle_stem)
@@ -758,6 +802,22 @@ def upload_ia(
                 retries=9001,
                 request_kwargs={"timeout": 9001},
                 delete=True,
+            )
+
+        # Caller-supplied extras (submodule bundles, release assets, issue
+        # exports).  Uploaded with their relative path under their common
+        # root dir preserved so e.g. releases/<tag>/<asset> stays grouped.
+        for extra in extra_files or []:
+            if not extra.exists():
+                log.warning(f"Extra file missing, skipping: {extra}")
+                continue
+            log.info(f"Uploading {extra.name} ...")
+            item.upload(
+                str(extra),
+                key=_extra_key(extra, repo_folder),
+                retries=9001,
+                request_kwargs={"timeout": 9001},
+                delete=False,
             )
 
     except Exception as exc:
