@@ -10,7 +10,7 @@
 **Archive git repositories to the [Internet Archive](https://archive.org).**
 
 `iagitup` clones a repository, packs it into a [git bundle](https://git-scm.com/docs/git-bundle), and uploads it to archive.org with metadata.
-`archive-watchlist` does the same for the most-starred GitHub repos on a schedule.
+`archive-watchlist` does it in bulk: every repo of a user or organization, or the most-starred GitHub repos.
 
 ---
 
@@ -23,7 +23,7 @@
 - **Rich metadata** -- description, README, avatar, stars and forks from the platform API.
 - **No duplicates** -- a snapshot is uploaded once; a new push creates a new item.
 - **Resumable** -- keep the clone and retry an interrupted upload without re-cloning.
-- **Bulk mode** -- top 1000 GitHub repos, date filters, parallel workers, JSON summaries.
+- **Bulk mode** -- every repo of a user or org, or the top 1000 GitHub repos. Parallel workers, JSON summaries.
 
 ---
 
@@ -86,12 +86,16 @@ archive-watchlist --owner torvalds --skip-archived --max-repos 20   # all repos 
 | `--work-dir DIR` | Where to put temporary clones (default: system temp) |
 | `--keep-work-dir` | Keep the clone after the run and print its path |
 | `--resume PATH` | Upload from a kept clone instead of cloning again |
+| `--include-forks` | Owner URL: also archive forks |
+| `--skip-archived` | Owner URL: skip archived repos |
+| `--max-repos N` | Owner URL: only the N most recently pushed repos |
 | `-v, --version` | Print version |
 
-A user/organization URL (exactly one path segment) archives all its repos via `archive-watchlist --owner`; `--include-forks`, `--skip-archived` and `--max-repos N` apply, `--resume`/`--metadata` do not.
+Archive every repo of a user or organization by passing its URL:
 
 ```bash
-iagitup --skip-archived https://github.com/torvalds
+iagitup https://github.com/torvalds
+iagitup --skip-archived --max-repos 20 https://gitlab.com/gnome
 ```
 
 Resume an interrupted upload:
@@ -160,7 +164,7 @@ Each snapshot is one IA item named `{host}-{owner}-{repo}_-_{YYYY-MM-DD_HH-MM-SS
 | `releases/releases.json`, `releases/<tag>/<asset>` | `--releases` |
 | `issues.json`, `pulls.json` | `--issues` |
 
-Item metadata: `title`, `date`, `year`, `creator`, `originalurl`, `pushed_date`, `subject` (`GitHub;code;software;git`), `stars_count`, `forks_count`, `has_lfs`, and an HTML `description` built from the repo description, README and restore instructions. `archive-watchlist` adds `language`, `topics`, `watchers_count` and `github_rank`. Fields passed with `--metadata` override these.
+Item metadata: `title`, `date`, `year`, `creator`, `originalurl`, `pushed_date`, `subject` (e.g. `GitHub;code;software;git`), `stars_count`, `forks_count`, `has_lfs`, and an HTML `description` built from the repo description, README and restore instructions. `archive-watchlist` adds `language`, `topics` and `watchers_count`, plus `github_rank` for top-starred runs. Fields passed with `--metadata` override these.
 
 ---
 
@@ -172,7 +176,7 @@ Item metadata: `title`, `date`, `year`, `creator`, `originalurl`, `pushed_date`,
 4. Create and verify the bundles.
 5. Upload everything to one item.
 
-`archive-watchlist` also keeps a local state file of `pushed_at` per repo, so unchanged repos are skipped with no network calls. Delete a repo's entry to force a re-archive.
+In owner mode, `archive-watchlist` first lists the repos through the platform API. It also keeps a local state file of `pushed_at` per repo, so unchanged repos are skipped with no network calls. Delete a repo's entry to force a re-archive.
 
 ---
 
